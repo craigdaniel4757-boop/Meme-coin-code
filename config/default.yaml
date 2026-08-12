@@ -21,7 +21,8 @@ data:
   geckoterminal:
     enabled: true                     # secondary source used ONLY for real OHLCV candles
     base_url: "https://api.geckoterminal.com/api/v2"
-    requests_per_minute: 28
+    requests_per_minute: 18           # conservative -- GeckoTerminal's free tier throttles well
+                                       # below this if requests aren't evenly paced (see rate_limiter.py)
   solana_rpc:
     url: "https://api.mainnet-beta.solana.com"   # overridden by SOLANA_RPC_URL env var
     requests_per_minute: 100
