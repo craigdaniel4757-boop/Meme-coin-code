@@ -52,9 +52,15 @@ activity — it does not, and cannot, guarantee profit.
    portfolio with configurable slippage/fees, or in live mode as real
    swaps signed and sent through Jupiter on Solana.
 9. **Backtests** — replay any strategy against recorded or fetched
-   history and get win rate, profit factor, expectancy, max drawdown, and
-   a Sharpe-style ratio back, so claims about a strategy are something you
-   can check yourself rather than take on faith.
+   history, gated by the same composite score used live, and get win rate,
+   profit factor, expectancy, max drawdown, and a Sharpe-style ratio back,
+   so claims about a strategy are something you can check yourself rather
+   than take on faith.
+10. **Auto-tunes scoring weights** — `optimize-weights` runs many
+    backtests across several pools with different weight combinations and
+    reports whichever performed best, with a minimum-trade-count floor and
+    multi-pool requirement specifically to push back on overfitting. See
+    `docs/STRATEGY.md` for the method and its honest limitations.
 
 ## Quick start
 
@@ -74,6 +80,10 @@ python -m bot run
 
 # Backtest a strategy against a specific pool's history.
 python -m bot backtest --chain solana --pair <pairAddress> --days 14
+
+# Search for scoring weights that historically performed best (pass
+# several --pair values -- optimizing against one pool overfits to it).
+python -m bot optimize-weights --chain solana --pair <pairAddress1> --pair <pairAddress2> --days 14
 
 # Current simulated (or live) portfolio state.
 python -m bot report
@@ -110,7 +120,8 @@ bot/execution/    Portfolio bookkeeping, paper execution (default),
                   live Jupiter execution (opt-in)
 bot/scanner/      The continuous scan -> filter -> score -> signal ->
                   execute orchestration loop
-bot/backtest/     Historical replay engine + performance metrics
+bot/backtest/     Historical replay engine, performance metrics, and a
+                  scoring-weight optimizer built on top of both
 bot/notify/       Optional Telegram / Discord alerts
 bot/storage/      SQLite persistence (candles, scan results, trades)
 bot/cli.py        scan / run / backtest / report / init-db subcommands

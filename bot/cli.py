@@ -16,9 +16,18 @@ from datetime import datetime, timezone
 from rich.console import Console
 from rich.table import Table
 
+from bot.analysis.safety_filters import SafetyConfig
 from bot.backtest.engine import run_backtest
 from bot.backtest.metrics import compute_metrics
-from bot.config import AppConfig, build_indicator_params, build_risk_config, load_config
+from bot.backtest.optimizer import OptimizerRunConfig, PoolSpec, optimize_weights
+from bot.config import (
+    AppConfig,
+    build_indicator_params,
+    build_risk_config,
+    build_safety_config,
+    build_scoring_weights,
+    load_config,
+)
 from bot.data.candles import CandleProvider
 from bot.data.dexscreener import DexScreenerClient
 from bot.data.geckoterminal import GeckoTerminalClient
@@ -140,7 +149,25 @@ def cmd_run(args: argparse.Namespace) -> None:
         db.close()
 
 
-async def _fetch_backtest_candles(cfg: AppConfig, chain_id: str, pair_address: str, days: int):
+def _interval_and_limit(days: int) -> tuple[int, int]:
+    interval = 3600 if days > 3 else 300  # coarser bars for longer windows keeps bar counts sane
+    limit = min(int(days * 86400 / interval), 1000)  # GeckoTerminal caps a single request at 1000 bars
+    return interval, limit
+
+
+def _backtest_safety_cfg(cfg: AppConfig) -> SafetyConfig:
+    """Backtesting has no live RPC feed to check on-chain mint/freeze
+    authority state historically, so those two checks (which live scanning
+    enforces) are disabled regardless of config; every other threshold
+    (liquidity/volume/age/FDV-ratio/buy-pressure floors) still reflects
+    your configured values."""
+    safety = build_safety_config(cfg)
+    safety.require_solana_mint_authority_renounced = False
+    safety.require_solana_freeze_authority_renounced = False
+    return safety
+
+
+async def _fetch_pools(cfg: AppConfig, chain_id: str, pair_addresses: list[str], days: int) -> list[PoolSpec]:
     db = Database(cfg.storage.sqlite_path)
     dex = DexScreenerClient(
         base_url=cfg.data.dexscreener.base_url, requests_per_minute=cfg.data.dexscreener.requests_per_minute
@@ -151,23 +178,26 @@ async def _fetch_backtest_candles(cfg: AppConfig, chain_id: str, pair_address: s
     provider = CandleProvider(
         db=db, gecko_client=gecko, fallback_interval_seconds=cfg.data.candles.fallback_interval_seconds
     )
+    interval, limit = _interval_and_limit(days)
 
-    interval = 3600 if days > 3 else 300  # coarser bars for longer windows keeps bar counts sane
-    limit = min(int(days * 86400 / interval), 1000)  # GeckoTerminal caps a single request at 1000 bars
-
-    symbol = pair_address[:8]
-    async with dex, gecko:
+    async def fetch_one(pair_address: str) -> PoolSpec:
+        symbol = pair_address[:8]
         pair = await dex.get_pair(chain_id, pair_address)
         if pair is not None and pair.symbol:
             symbol = pair.symbol
         df = await provider.get_candles(chain_id, pair_address, interval_seconds=interval, limit=limit)
+        return PoolSpec(chain_id=chain_id, pair_address=pair_address, symbol=symbol, candles=df)
+
+    async with dex, gecko:
+        pools = list(await asyncio.gather(*(fetch_one(addr) for addr in pair_addresses)))
     db.close()
-    return df, symbol
+    return pools
 
 
 def cmd_backtest(args: argparse.Namespace) -> None:
     cfg = _load(args.config)
-    df, symbol = asyncio.run(_fetch_backtest_candles(cfg, args.chain, args.pair, args.days))
+    pool = asyncio.run(_fetch_pools(cfg, args.chain, [args.pair], args.days))[0]
+    df, symbol = pool.candles, pool.symbol
     if df.empty or len(df) < 60:
         console.print(
             f"[red]Not enough historical candle data for {args.chain}:{args.pair} "
@@ -186,6 +216,9 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         starting_bankroll_usd=cfg.risk.starting_bankroll_usd,
         simulated_slippage_bps=cfg.execution.paper.simulated_slippage_bps,
         simulated_fee_bps=cfg.execution.paper.simulated_fee_bps,
+        scoring_weights=build_scoring_weights(cfg),
+        min_score_to_trade=cfg.scoring.min_score_to_trade,
+        safety_cfg=_backtest_safety_cfg(cfg),
     )
     metrics = compute_metrics(result)
 
@@ -209,8 +242,115 @@ def cmd_backtest(args: argparse.Namespace) -> None:
         table.add_row(name, value)
     console.print(table)
     console.print(
-        "\n[dim]A backtest is a sanity check against historical data, not a promise of "
-        "future performance -- see docs/STRATEGY.md.[/dim]"
+        "\n[dim]Entries are gated by your configured composite score/safety threshold, same as live "
+        "scanning. A backtest is a sanity check against historical data, not a promise of future "
+        "performance -- see docs/STRATEGY.md.[/dim]"
+    )
+
+
+def cmd_optimize_weights(args: argparse.Namespace) -> None:
+    cfg = _load(args.config)
+    pools = asyncio.run(_fetch_pools(cfg, args.chain, args.pair, args.days))
+
+    usable_pools = []
+    for p in pools:
+        if p.candles.empty or len(p.candles) < 60:
+            console.print(
+                f"[yellow]Skipping {p.symbol} ({args.chain}:{p.pair_address}): only "
+                f"{len(p.candles)} bars of history.[/yellow]"
+            )
+            continue
+        usable_pools.append(p)
+
+    if not usable_pools:
+        console.print("[red]No pool had enough historical data to optimize against.[/red]")
+        return
+
+    opt_cfg = OptimizerRunConfig(
+        indicator_params=build_indicator_params(cfg),
+        strategy_params=cfg.strategy.params_dict(),
+        active_strategies=cfg.strategy.active,
+        risk_cfg=build_risk_config(cfg),
+        safety_cfg=_backtest_safety_cfg(cfg),
+        min_score_to_trade=cfg.scoring.min_score_to_trade,
+        min_trades_per_pool=args.min_trades,
+        drawdown_penalty=args.drawdown_penalty,
+        starting_bankroll_usd=cfg.risk.starting_bankroll_usd,
+        simulated_slippage_bps=cfg.execution.paper.simulated_slippage_bps,
+        simulated_fee_bps=cfg.execution.paper.simulated_fee_bps,
+    )
+
+    console.print(
+        f"Optimizing scoring weights across {len(usable_pools)} pool(s) "
+        f"({', '.join(p.symbol for p in usable_pools)}), {args.trials} trials...\n"
+    )
+    result = optimize_weights(
+        usable_pools,
+        opt_cfg,
+        baseline_weights=build_scoring_weights(cfg),
+        trials=args.trials,
+        seed=args.seed,
+    )
+
+    if result.trials_disqualified == result.trials_run:
+        console.print(
+            f"[red]All {result.trials_run} trials were disqualified: fewer than {args.min_trades} "
+            "closed trades on at least one pool for every weight combination tried. Try a longer "
+            "window (--days), fewer/different pools, or a lower --min-trades.[/red]"
+        )
+        return
+    if result.trials_disqualified:
+        console.print(
+            f"[dim]{result.trials_disqualified}/{result.trials_run} trials disqualified "
+            f"(fewer than {args.min_trades} closed trades on at least one pool).[/dim]\n"
+        )
+
+    def fmt_fitness(c) -> str:
+        return "disqualified (too few trades)" if c.disqualified else f"{c.fitness:.2f}"
+
+    table = Table(title="Baseline (current config) vs. best found")
+    table.add_column("")
+    table.add_column("Baseline", justify="right")
+    table.add_column("Best found", justify="right")
+    table.add_row("Fitness (expectancy - drawdown penalty)", fmt_fitness(result.baseline), fmt_fitness(result.best))
+    for field_name in ("trend", "momentum", "volume", "volatility", "liquidity_safety", "social"):
+        table.add_row(
+            f"  weight: {field_name}",
+            f"{getattr(result.baseline.weights, field_name):.3f}",
+            f"{getattr(result.best.weights, field_name):.3f}",
+        )
+    console.print(table)
+
+    pool_table = Table(title="Per-pool performance with the best-found weights")
+    for col in ["Pool", "Closed trades", "Win rate", "Expectancy", "Max drawdown"]:
+        pool_table.add_column(col)
+    for pr in result.best.pool_results:
+        pool_table.add_row(
+            pr.pool.symbol,
+            str(pr.metrics.closed_trades),
+            f"{pr.metrics.win_rate_pct:.1f}%",
+            f"${pr.metrics.expectancy_usd:.2f}",
+            f"{pr.metrics.max_drawdown_pct:.1f}%",
+        )
+    console.print(pool_table)
+
+    w = result.best.weights
+    snippet = (
+        "scoring:\n"
+        "  weights:\n"
+        f"    trend: {w.trend:.3f}\n"
+        f"    momentum: {w.momentum:.3f}\n"
+        f"    volume: {w.volume:.3f}\n"
+        f"    volatility: {w.volatility:.3f}\n"
+        f"    liquidity_safety: {w.liquidity_safety:.3f}\n"
+        f"    social: {w.social:.3f}\n"
+    )
+    console.print("\n[bold]To use these weights, paste this into your config (e.g. config/local.yaml):[/bold]")
+    console.print(snippet, highlight=False)
+    console.print(
+        "[dim]This searched a limited amount of historical data across a handful of pools -- treat "
+        "it as a data-backed starting point worth continuing to validate (different pools, different "
+        "date ranges), not a finished answer. See docs/STRATEGY.md.[/dim]"
     )
 
 
@@ -301,6 +441,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_report = sub.add_parser("report", help="Show current open positions and recent trades", parents=[common])
     p_report.add_argument("--limit", type=int, default=50, help="Max recent trades to show")
     p_report.set_defaults(func=cmd_report)
+
+    p_opt = sub.add_parser(
+        "optimize-weights",
+        help="Search for scoring weights that historically performed best, via repeated backtests",
+        parents=[common],
+    )
+    p_opt.add_argument("--chain", required=True, help="DexScreener chain id, e.g. solana")
+    p_opt.add_argument(
+        "--pair", required=True, action="append",
+        help="Pool/pair address to test against (repeat --pair for multiple pools; strongly recommended, "
+        "since optimizing against a single pool risks fitting its specific noise)",
+    )
+    p_opt.add_argument("--days", type=int, default=14, help="Lookback window in days per pool (capped at 1000 bars)")
+    p_opt.add_argument(
+        "--trials", type=int, default=150,
+        help="Number of random weight combinations to try -- runtime scales with trials x pools x bars; "
+        "the defaults (150 trials, --days 14) typically take well under a minute per pool, but a long "
+        "--days with many --pair values can take several minutes",
+    )
+    p_opt.add_argument(
+        "--min-trades", type=int, default=5,
+        help="Minimum closed trades required on EVERY pool for a weight combination to count",
+    )
+    p_opt.add_argument(
+        "--drawdown-penalty", type=float, default=0.5,
+        help="Fitness penalty subtracted per 1%% of max drawdown (higher = more risk-averse search)",
+    )
+    p_opt.add_argument("--seed", type=int, default=42, help="Random seed -- fixed by default for reproducible results")
+    p_opt.set_defaults(func=cmd_optimize_weights)
 
     return parser
 

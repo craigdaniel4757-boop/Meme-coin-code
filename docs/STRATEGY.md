@@ -152,15 +152,103 @@ tradeable — they aren't required to agree.
 
 `bot/backtest/engine.py` replays the exact same indicator/strategy/risk-
 manager code used live, bar-by-bar, over historical candles for one pool
-at a time. Read the caveats in that file's docstring before trusting a
-result: fills happen at the current bar's close (no execution-lag
-modeling), slippage/fees are flat assumptions rather than a real order
-book, and there's no way to model the price impact of the bot's own
-hypothetical order or a rug pull that isn't visible in the recorded price
-series. Use backtest results to compare strategies and parameters against
-each other on the same data — not as a forecast of live performance.
+at a time — and, by default (`python -m bot backtest`), also applies the
+same composite score and safety gate live scanning does, so results
+reflect what the bot would actually have done, not just "does this
+strategy pattern ever appear in the data."
 
-## 7. What "highest possible win rate" actually requires
+That gate needs pair stats (liquidity, volume, transaction counts, FDV,
+age) a bare OHLCV history doesn't carry. What the backtester does with
+that:
+
+- **Real, derived from the candles**: 24h volume and 5m price change (read
+  directly off the window), and buy/sell transaction counts (each bar
+  classified buy/sell by whether it closed up or down — a crude per-bar
+  proxy, since real counts are per-trade, not per-bar). Pair *age* is also
+  real within the backtest: it's simulated as elapsed bars from the start
+  of the series, not the wall-clock time since the data's real historical
+  date.
+- **Fixed placeholders for the whole run**: liquidity and FDV, which have
+  no historical time series available from OHLCV at all. This means the
+  liquidity-floor, FDV-ratio, and liquidity-depth-scoring checks don't
+  vary bar to bar in a backtest — only the age- and activity-derived parts
+  of the safety gate and score do.
+- **Not evaluated at all**: Solana mint/freeze authority renouncement,
+  since there's no historical on-chain RPC feed to check it against. Those
+  two checks are disabled in every backtest regardless of config; they're
+  validated live, not historically.
+
+Read the rest of the caveats in `bot/backtest/engine.py`'s docstring
+before trusting a result: fills happen at the current bar's close (no
+execution-lag modeling), slippage/fees are flat assumptions rather than a
+real order book, and there's no way to model the price impact of the
+bot's own hypothetical order or a rug pull that isn't visible in the
+recorded price series. Use backtest results to compare strategies and
+parameters against each other on the same data — not as a forecast of
+live performance.
+
+## 7. Auto-tuning scoring weights (`python -m bot optimize-weights`)
+
+`bot/backtest/optimizer.py` searches for a set of the six scoring weights
+(trend/momentum/volume/volatility/liquidity_safety/social) that would have
+performed best, by literally running many backtests with different weight
+vectors and keeping the winner — optimizing directly for realized
+backtest performance through the real score-gate → strategy → risk-manager
+pipeline, rather than an indirect statistical proxy like correlating
+individual factors with forward returns.
+
+**Search method**: weight vectors are sampled uniformly over the
+probability simplex (Dirichlet(1,...,1) — "any non-negative combination
+that sums to 1, with no bias toward the center or the corners"), the best
+of `--trials` random samples is kept, then polished with a short
+coordinate-wise hill-climbing pass (nudge weight from one factor to
+another, keep the move only if it improves the score). No heavyweight
+optimization library involved — deliberately, since the objective is
+noisy and discontinuous (discrete trade counts), which is exactly the
+kind of landscape simple random search plus local refinement handles
+reasonably without the machinery (and false precision) of gradient-based
+methods.
+
+**Runtime**: candle indicators and the candle-derived pair-stat proxies
+are precomputed once per pool and reused across every trial (they don't
+depend on the weights being searched), but each trial still re-evaluates
+the composite score bar by bar, since that *does* depend on the weights.
+Runtime scales roughly with `trials x pools x bars`. The defaults (150
+trials, `--days 14`, which fetches hourly bars) typically finish in well
+under a minute per pool; a short `--days` (which switches to 5-minute
+bars) combined with many pools and a high `--trials` can take several
+minutes.
+
+**Fitness function**: `expectancy_per_trade - drawdown_penalty *
+max_drawdown_pct`, computed per pool and averaged across every pool
+tested. A weight combination that doesn't produce at least `--min-trades`
+closed trades on **every** pool is fully disqualified (`-inf`), not just
+penalized — a couple of lucky trades on thin data shouldn't be able to
+"win" the search, and requiring every pool to clear the bar (rather than
+just averaging over however many did) rewards weights that work
+reasonably broadly, not weights fit to one coin's specific noise.
+
+**Overfitting is the real risk here, not a hypothetical one.** Searching
+over many weight combinations against a limited amount of historical data
+is a textbook way to fit noise. Two things push back on it: the minimum-
+trade-count floor, and testing against *multiple* pools (always pass
+several `--pair` values, not one). Neither eliminates the risk — more and
+longer history, across more pools, is the only real fix. Treat the result
+as a reasonable, data-backed starting point worth continuing to validate
+(different pools, different date ranges) — not a finished answer, and
+not something to blindly paste into a live config without watching how it
+actually performs.
+
+Because the composite score mixes candle-derived factors (trend, momentum,
+volatility, and the activity-driven parts of volume/liquidity_safety —
+see §6) with factors that stay constant for a whole backtest (liquidity
+depth, FDV ratio, social presence), the search can meaningfully learn
+weights for the former but has nothing to learn from for the latter within
+a single-pool run — a weight near zero on `social` in the result, for
+instance, may just reflect that `social` never varied in the data tested,
+not that social signals are actually worthless live.
+
+## 8. What "highest possible win rate" actually requires
 
 It requires, honestly: none of this is enough on its own. Meme coins are
 dominated by reflexive, narrative-driven, often outright manipulated price
