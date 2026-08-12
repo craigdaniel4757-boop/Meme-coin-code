@@ -45,7 +45,8 @@ scanner:
     use_latest_profiles: true
     search_terms: ["pump", "meme", "dog", "cat", "inu", "elon", "pepe"]
     watchlist: []                     # explicit "chainId:pairAddress" entries always scanned
-  scan_interval_seconds: 60
+  scan_interval_seconds: 2   # floor between cycles; the DexScreener/GeckoTerminal
+                              # rate limiters below still cap actual request throughput
   max_candidates_per_cycle: 300
   max_concurrent_requests: 12
 
