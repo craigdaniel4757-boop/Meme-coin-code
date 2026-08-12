@@ -41,7 +41,15 @@ CHAIN_ID_MAP: dict[str, str] = {
     "optimism": "optimism",
 }
 
-_RETRYABLE_STATUS = {429, 500, 502, 503, 504}
+# Deliberately excludes 429: retrying a rate-limit rejection within the
+# same call's few-second backoff window rarely helps (the underlying
+# problem is a per-minute quota, or a longer server-side cooldown after a
+# burst) and just spends more of an already-exhausted budget instead of
+# moving on to the next candidate. 5xx and transport errors are usually
+# transient and worth a quick retry; 429 is better handled by simply
+# falling back for this pool and letting the normal pacing try again
+# naturally on a later cycle.
+_RETRYABLE_STATUS = {500, 502, 503, 504}
 
 # (timeframe, max_aggregate_options) supported by the GeckoTerminal OHLCV endpoint.
 _TIMEFRAME_AGGREGATES: list[tuple[str, int]] = [
@@ -139,7 +147,12 @@ class GeckoTerminalClient:
                 params={"aggregate": aggregate, "limit": min(max(limit, 1), 1000), "currency": "usd"},
             )
         except (httpx.TransportError, httpx.HTTPStatusError) as exc:
-            logger.info("GeckoTerminal OHLCV unavailable for %s:%s (%s)", chain_id, pool_address, exc)
+            # Best-effort enrichment source -- a miss here just means this
+            # pool falls back to locally resampled candles (see
+            # bot/data/candles.py), not a real error. Kept at DEBUG so a
+            # busy scan (which can hit this often under rate limiting)
+            # doesn't drown out everything else at the default log level.
+            logger.debug("GeckoTerminal OHLCV unavailable for %s:%s (%s)", chain_id, pool_address, exc)
             return []
 
         try:

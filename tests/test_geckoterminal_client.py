@@ -66,3 +66,34 @@ async def test_get_ohlcv_returns_empty_on_malformed_payload():
     async with GeckoTerminalClient(base_url=BASE_URL) as client:
         candles = await client.get_ohlcv("solana", "POOL1", interval_seconds=60)
     assert candles == []
+
+
+@respx.mock
+async def test_get_ohlcv_does_not_retry_on_429():
+    """Regression test: 429 used to be in the retryable set, so a single
+    rate-limited pool burned 3 requests (with backoff sleeps) against a
+    server that had just said "too many requests" -- worsening exactly the
+    problem it was trying to recover from. A 429 should fail this one
+    fetch immediately and let the caller fall back, not retry in place."""
+    route = respx.get(f"{BASE_URL}/networks/solana/pools/POOL1/ohlcv/minute").mock(
+        return_value=httpx.Response(429)
+    )
+    async with GeckoTerminalClient(base_url=BASE_URL) as client:
+        candles = await client.get_ohlcv("solana", "POOL1", interval_seconds=60)
+
+    assert candles == []
+    assert route.call_count == 1  # no retries
+
+
+@respx.mock
+async def test_get_ohlcv_still_retries_on_server_error():
+    route = respx.get(f"{BASE_URL}/networks/solana/pools/POOL1/ohlcv/minute")
+    route.side_effect = [
+        httpx.Response(503),
+        httpx.Response(200, json={"data": {"attributes": {"ohlcv_list": [[100, 1.0, 1.1, 0.9, 1.05, 900]]}}}),
+    ]
+    async with GeckoTerminalClient(base_url=BASE_URL) as client:
+        candles = await client.get_ohlcv("solana", "POOL1", interval_seconds=60)
+
+    assert route.call_count == 2
+    assert len(candles) == 1
