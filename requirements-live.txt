@@ -1,0 +1,7 @@
+## Only needed if execution.mode = "live" in config (real on-chain swaps via Jupiter).
+## Kept separate from requirements.txt so paper trading / backtesting / scanning
+## never depend on wallet-signing libraries.
+-r requirements.txt
+
+solders>=0.21,<1.0          # Solana transaction (de)serialization + signing
+base58>=2.1,<3.0            # wallet private key decoding

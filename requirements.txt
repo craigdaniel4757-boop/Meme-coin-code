@@ -1,0 +1,11 @@
+## Core runtime dependencies for the scanner, analysis engine, paper trading,
+## backtester and CLI. Live on-chain execution needs requirements-live.txt too.
+
+httpx>=0.27,<1.0            # async HTTP client for DexScreener / GeckoTerminal / Jupiter / RPC
+pandas>=2.1,<3.0            # OHLCV handling + indicator math
+numpy>=1.26,<2.0            # numeric backbone for indicators
+pydantic>=2.6,<3.0          # typed, validated configuration
+PyYAML>=6.0,<7.0            # config/default.yaml parsing
+python-dotenv>=1.0,<2.0     # .env loading for secrets
+rich>=13.7,<14.0            # scan report tables / CLI output
+tenacity>=8.2,<9.0          # retry/backoff for flaky HTTP calls

@@ -1,0 +1,150 @@
+"""Hard safety gate tests. Every check should fail *closed* when the data
+needed to evaluate it is missing, except the two documented exceptions
+(FDV/liquidity ratio and buy/sell pressure, which pass when the underlying
+numbers are simply absent rather than present-and-bad) -- see the module
+docstring in bot/analysis/safety_filters.py.
+"""
+
+from __future__ import annotations
+
+from bot.analysis.safety_filters import SafetyConfig, evaluate_safety
+from bot.data.solana_safety import MintAuthorityInfo
+from tests.conftest import make_pair
+
+NO_SOLANA_CHECKS = SafetyConfig(
+    require_solana_mint_authority_renounced=False,
+    require_solana_freeze_authority_renounced=False,
+)
+
+
+def test_healthy_pair_passes():
+    pair = make_pair()
+    result = evaluate_safety(pair, NO_SOLANA_CHECKS)
+    assert result.passed
+    assert result.reasons == []
+
+
+def test_low_liquidity_fails():
+    pair = make_pair(liquidity_usd=500.0)
+    cfg = SafetyConfig(
+        min_liquidity_usd=8000.0,
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["min_liquidity"] is False
+
+
+def test_low_volume_fails():
+    pair = make_pair(volume_24h_usd=100.0)
+    cfg = SafetyConfig(
+        min_volume_24h_usd=15000.0,
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["min_volume"] is False
+
+
+def test_too_young_fails():
+    pair = make_pair(age_minutes=2.0)
+    cfg = SafetyConfig(
+        min_pair_age_minutes=15.0,
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["min_age"] is False
+
+
+def test_too_old_fails():
+    pair = make_pair(age_minutes=999_999.0)
+    cfg = SafetyConfig(
+        max_pair_age_days=45.0,
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["max_age"] is False
+
+
+def test_high_fdv_to_liquidity_ratio_fails():
+    pair = make_pair(liquidity_usd=10_000.0, fdv=10_000_000.0)  # 1000x
+    cfg = SafetyConfig(
+        max_fdv_to_liquidity_ratio=25.0,
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["fdv_liquidity_ratio"] is False
+
+
+def test_heavy_sell_pressure_fails():
+    pair = make_pair(buys_5m=5, sells_5m=45)  # 10% buys
+    cfg = SafetyConfig(
+        min_buy_ratio_5m=0.35,
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["buy_sell_pressure"] is False
+
+
+def test_blacklisted_token_fails_regardless_of_stats():
+    pair = make_pair(chain_id="solana", pair_address="BADPAIR")
+    cfg = SafetyConfig(
+        blacklist_tokens=["solana:BADPAIR"],
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+    )
+    result = evaluate_safety(pair, cfg)
+    assert not result.passed
+    assert result.checks["not_blacklisted"] is False
+
+
+def test_solana_missing_mint_info_fails_closed():
+    pair = make_pair(chain_id="solana")
+    cfg = SafetyConfig(require_solana_mint_authority_renounced=True, require_solana_freeze_authority_renounced=True)
+    result = evaluate_safety(pair, cfg, mint_info=None)
+    assert not result.passed
+    assert result.checks["mint_authority_renounced"] is False
+    assert result.checks["freeze_authority_renounced"] is False
+
+
+def test_solana_renounced_authorities_pass():
+    pair = make_pair(chain_id="solana")
+    cfg = SafetyConfig(require_solana_mint_authority_renounced=True, require_solana_freeze_authority_renounced=True)
+    mint_info = MintAuthorityInfo(
+        mint_address="x", parsed_ok=True, mint_authority=None, freeze_authority=None, decimals=6, supply=10**9
+    )
+    result = evaluate_safety(pair, cfg, mint_info=mint_info)
+    assert result.checks["mint_authority_renounced"] is True
+    assert result.checks["freeze_authority_renounced"] is True
+    assert result.passed
+
+
+def test_solana_retained_mint_authority_fails():
+    pair = make_pair(chain_id="solana")
+    cfg = SafetyConfig(require_solana_mint_authority_renounced=True, require_solana_freeze_authority_renounced=False)
+    mint_info = MintAuthorityInfo(
+        mint_address="x", parsed_ok=True, mint_authority="DeployerWallet111", freeze_authority=None,
+        decimals=6, supply=1,
+    )
+    result = evaluate_safety(pair, cfg, mint_info=mint_info)
+    assert not result.passed
+    assert result.checks["mint_authority_renounced"] is False
+
+
+def test_non_solana_chain_skips_solana_checks():
+    pair = make_pair(chain_id="ethereum")
+    cfg = SafetyConfig(require_solana_mint_authority_renounced=True, require_solana_freeze_authority_renounced=True)
+    result = evaluate_safety(pair, cfg, mint_info=None)
+    assert "mint_authority_renounced" not in result.checks
+    assert "freeze_authority_renounced" not in result.checks
+    assert result.passed

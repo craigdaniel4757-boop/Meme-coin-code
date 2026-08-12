@@ -1,0 +1,171 @@
+# ==============================================================================
+# memebot default configuration
+#
+# Copy this file (e.g. to config/local.yaml) and override values instead of
+# editing this one in place, then run with `--config config/local.yaml`.
+# Every value here can also be overridden by an environment variable for
+# secrets -- see .env.example.
+# ==============================================================================
+
+general:
+  log_level: INFO
+  timezone: UTC
+
+# ------------------------------------------------------------------------------
+# Data sources
+# ------------------------------------------------------------------------------
+data:
+  dexscreener:
+    base_url: "https://api.dexscreener.com"
+    requests_per_minute: 250          # keep comfortably under DexScreener's published limits
+  geckoterminal:
+    enabled: true                     # secondary source used ONLY for real OHLCV candles
+    base_url: "https://api.geckoterminal.com/api/v2"
+    requests_per_minute: 28
+  solana_rpc:
+    url: "https://api.mainnet-beta.solana.com"   # overridden by SOLANA_RPC_URL env var
+    requests_per_minute: 100
+  candles:
+    # If a pool has no OHLCV history available from GeckoTerminal yet, memebot
+    # builds its own candles by resampling the price ticks it observes while
+    # scanning. Quality of technical analysis on very new pairs improves the
+    # longer the bot has been watching them.
+    fallback_interval_seconds: 60
+    max_local_candles: 2000
+  cache_ttl_seconds: 20
+
+# ------------------------------------------------------------------------------
+# Universe discovery / continuous scanning
+# ------------------------------------------------------------------------------
+scanner:
+  chains: ["solana", "ethereum", "base", "bsc"]
+  discovery:
+    use_latest_boosted: true
+    use_top_boosted: true
+    use_latest_profiles: true
+    search_terms: ["pump", "meme", "dog", "cat", "inu", "elon", "pepe"]
+    watchlist: []                     # explicit "chainId:pairAddress" entries always scanned
+  scan_interval_seconds: 60
+  max_candidates_per_cycle: 300
+  max_concurrent_requests: 12
+
+  # Coarse pre-filters applied before a candidate is even scored, so obvious
+  # junk (dead pairs, dust liquidity, brand-new unseasoned pairs) never
+  # reaches the analysis engine.
+  min_liquidity_usd: 8000
+  min_volume_24h_usd: 15000
+  min_pair_age_minutes: 15
+  max_pair_age_days: 45
+  min_txns_24h: 50
+
+# ------------------------------------------------------------------------------
+# Hard safety gates -- a candidate that fails ANY of these is dropped
+# regardless of how good its technical score looks. This is where rug-pull
+# and honeypot heuristics live.
+# ------------------------------------------------------------------------------
+safety:
+  require_solana_mint_authority_renounced: true
+  require_solana_freeze_authority_renounced: true
+  max_fdv_to_liquidity_ratio: 25.0
+  min_buy_ratio_5m: 0.35              # reject if fewer than this fraction of 5m txns are buys (dump warning)
+  blacklist_tokens: []                # "chainId:pairAddress" entries never traded
+
+# ------------------------------------------------------------------------------
+# Composite technical + fundamental scoring model (0-100).
+# See docs/STRATEGY.md for the full rationale behind each factor.
+# ------------------------------------------------------------------------------
+scoring:
+  weights:
+    trend: 0.25
+    momentum: 0.20
+    volume: 0.20
+    volatility: 0.10
+    liquidity_safety: 0.15
+    social: 0.10
+  min_score_to_trade: 68
+  watchlist_score: 55                 # below min_score_to_trade but worth tracking/alerting
+
+# ------------------------------------------------------------------------------
+# Indicator parameters shared by the scoring model and the strategies
+# ------------------------------------------------------------------------------
+indicators:
+  rsi_period: 14
+  ema_fast: 9
+  ema_mid: 21
+  ema_slow: 50
+  macd_fast: 12
+  macd_slow: 26
+  macd_signal: 9
+  bollinger_period: 20
+  bollinger_std: 2.0
+  atr_period: 14
+  volume_zscore_period: 20
+  swing_lookback: 20
+
+# ------------------------------------------------------------------------------
+# Strategy selection. Every listed strategy votes; a BUY needs at least one
+# strategy signal plus a passing composite score.
+# ------------------------------------------------------------------------------
+strategy:
+  active: ["momentum_breakout", "volume_spike_breakout", "trend_pullback"]
+  momentum_breakout:
+    breakout_lookback: 20
+    min_volume_zscore: 1.5
+  volume_spike_breakout:
+    min_volume_zscore: 2.5
+    max_rsi: 85
+  trend_pullback:
+    rsi_pullback_low: 38
+    rsi_pullback_high: 52
+
+# ------------------------------------------------------------------------------
+# Risk management -- applies identically to paper and live execution
+# ------------------------------------------------------------------------------
+risk:
+  starting_bankroll_usd: 1000.0
+  risk_per_trade_pct: 2.0             # % of bankroll risked (to stop-loss) per position
+  max_concurrent_positions: 6
+  max_allocation_pct_per_token: 15.0  # hard cap regardless of risk_per_trade_pct sizing
+  stop_loss_pct: 15.0
+  take_profit_ladder:                 # [gain_pct, fraction_of_position_to_sell]
+    - [50, 0.25]
+    - [100, 0.25]
+    - [200, 0.25]
+  trailing_stop_activate_pct: 40.0    # trailing stop only arms after this much unrealized gain
+  trailing_stop_distance_pct: 18.0
+  max_hold_minutes: 720
+  max_daily_loss_pct: 8.0             # circuit breaker: halt new entries for the day past this
+  max_slippage_bps: 150
+
+# ------------------------------------------------------------------------------
+# Execution
+# ------------------------------------------------------------------------------
+execution:
+  mode: "paper"                       # "paper" (default, simulated) or "live" (real funds)
+  paper:
+    starting_balance_usd: 1000.0
+    simulated_slippage_bps: 60
+    simulated_fee_bps: 30
+  live:
+    dex_aggregator: "jupiter"
+    priority_fee_lamports: 200000
+    max_slippage_bps: 150
+    # Extra explicit opt-in required on top of mode: "live" and the CLI
+    # --i-understand-the-risk flag -- see bot/execution/jupiter_live.py
+    required_confirm_phrase: "I UNDERSTAND THE RISK"
+
+# ------------------------------------------------------------------------------
+# Notifications
+# ------------------------------------------------------------------------------
+notifications:
+  telegram_enabled: false
+  discord_enabled: false
+  notify_on_signal: true
+  notify_on_trade: true
+  notify_on_circuit_breaker: true
+
+# ------------------------------------------------------------------------------
+# Storage
+# ------------------------------------------------------------------------------
+storage:
+  sqlite_path: "data/memebot.db"
