@@ -247,7 +247,10 @@ def run_backtest(
         indicators = snapshot_from_series_row(series, i)
 
         if open_position is not None:
-            for action in evaluate_exits(open_position, price, risk_cfg, now=ts):
+            bearish_reversal = indicators.bearish_divergence or indicators.bearish_engulfing
+            for action in evaluate_exits(
+                open_position, price, risk_cfg, now=ts, bearish_reversal=bearish_reversal
+            ):
                 fill_price = price * (1 - simulated_slippage_bps / 10_000)
                 qty = open_position.quantity * action.fraction
                 proceeds = qty * fill_price

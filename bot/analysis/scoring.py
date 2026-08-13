@@ -118,7 +118,15 @@ def _momentum_score(ind: IndicatorSnapshot) -> tuple[float, list[str]]:
             elif ind.macd_hist < ind.macd_hist_prev:
                 notes.append("MACD histogram falling")
 
-    return rsi_score * 0.55 + macd_score * 0.45, notes
+    total = rsi_score * 0.55 + macd_score * 0.45
+    if ind.bearish_divergence:
+        total = max(0.0, total - 15.0)
+        notes.append("bearish RSI divergence (fresh high on weaker RSI)")
+    elif ind.bullish_divergence:
+        total = min(100.0, total + 15.0)
+        notes.append("bullish RSI divergence (fresh low on stronger RSI)")
+
+    return total, notes
 
 
 def _volume_score(pair: DexPair, ind: IndicatorSnapshot) -> tuple[float, list[str]]:

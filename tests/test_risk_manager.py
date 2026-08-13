@@ -234,3 +234,57 @@ def test_liquidity_trend_without_data_does_not_affect_normal_exits():
 
     assert len(actions) == 1
     assert actions[0].kind == "stop_loss"
+
+
+def test_bearish_reversal_exits_full_position_above_min_gain():
+    cfg = _cfg(reversal_exit_min_gain_pct=15.0)
+    pos = _position(cfg)  # entry 1.0
+
+    actions = evaluate_exits(pos, current_price=1.20, cfg=cfg, now=pos.entry_time, bearish_reversal=True)
+
+    assert len(actions) == 1
+    assert actions[0].kind == "reversal"
+    assert actions[0].fraction == pytest.approx(1.0)
+
+
+def test_bearish_reversal_does_not_trigger_below_min_gain():
+    cfg = _cfg(reversal_exit_min_gain_pct=15.0, trailing_stop_activate_pct=1000.0, take_profit_ladder=[])
+    pos = _position(cfg)  # entry 1.0
+
+    actions = evaluate_exits(pos, current_price=1.05, cfg=cfg, now=pos.entry_time, bearish_reversal=True)
+
+    assert actions == []
+
+
+def test_bearish_reversal_ignored_when_flag_is_false():
+    cfg = _cfg(reversal_exit_min_gain_pct=15.0, trailing_stop_activate_pct=1000.0, take_profit_ladder=[])
+    pos = _position(cfg)  # entry 1.0
+
+    actions = evaluate_exits(pos, current_price=1.20, cfg=cfg, now=pos.entry_time, bearish_reversal=False)
+
+    assert actions == []
+
+
+def test_bearish_reversal_disabled_by_config_even_when_flagged():
+    cfg = _cfg(
+        reversal_exit_min_gain_pct=15.0, require_reversal_exit=False,
+        trailing_stop_activate_pct=1000.0, take_profit_ladder=[],
+    )
+    pos = _position(cfg)  # entry 1.0
+
+    actions = evaluate_exits(pos, current_price=1.20, cfg=cfg, now=pos.entry_time, bearish_reversal=True)
+
+    assert actions == []
+
+
+def test_bearish_reversal_overrides_take_profit_ladder():
+    """A confirmed reversal exits the *full* remaining position, not just
+    whichever take-profit rung price happens to have crossed."""
+    cfg = _cfg(reversal_exit_min_gain_pct=15.0, take_profit_ladder=[(50.0, 0.25)], trailing_stop_activate_pct=1000.0)
+    pos = _position(cfg)  # entry 1.0
+
+    actions = evaluate_exits(pos, current_price=1.60, cfg=cfg, now=pos.entry_time, bearish_reversal=True)  # +60%, past the +50% rung
+
+    assert len(actions) == 1
+    assert actions[0].kind == "reversal"
+    assert actions[0].fraction == pytest.approx(1.0)

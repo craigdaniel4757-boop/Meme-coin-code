@@ -135,3 +135,98 @@ def test_vectorized_series_matches_recompute_on_truncated_window():
         assert fast.atr == pytest.approx(slow.atr, rel=1e-9, abs=1e-9)
         assert fast.swing_high == pytest.approx(slow.swing_high, rel=1e-9, abs=1e-9)
         assert fast.vwap == pytest.approx(slow.vwap, rel=1e-9, abs=1e-9)
+        assert fast.bb_bandwidth_min_recent == pytest.approx(slow.bb_bandwidth_min_recent, rel=1e-9, abs=1e-9)
+        assert fast.bearish_divergence == slow.bearish_divergence
+        assert fast.bullish_divergence == slow.bullish_divergence
+        assert fast.bearish_engulfing == slow.bearish_engulfing
+
+
+# -- rolling_bandwidth_min -------------------------------------------------------
+
+
+def test_rolling_bandwidth_min_excludes_current_bar():
+    bandwidth = pd.Series([10.0, 8.0, 5.0, 3.0, 20.0])
+    result = ind.rolling_bandwidth_min(bandwidth, lookback=4)
+    # at index 4 (value 20), the min of the prior 4 bars (10, 8, 5, 3) = 3
+    # -- not including the 20 itself.
+    assert result.iloc[4] == 3.0
+
+
+# -- bearish_engulfing ------------------------------------------------------------
+
+
+def test_bearish_engulfing_detects_classic_pattern():
+    df = pd.DataFrame(
+        {
+            "open": [1.00, 1.05],
+            "high": [1.06, 1.06],
+            "low": [0.99, 0.94],
+            "close": [1.05, 0.98],  # bar0 green, bar1 red and fully engulfs bar0's body
+        }
+    )
+    result = ind.bearish_engulfing(df)
+    assert bool(result.iloc[1]) is True
+
+
+def test_bearish_engulfing_false_when_body_not_fully_engulfed():
+    df = pd.DataFrame(
+        {
+            "open": [1.00, 1.02],
+            "high": [1.06, 1.06],
+            "low": [0.99, 0.99],
+            "close": [1.05, 1.00],  # bar1 is red but its open doesn't clear bar0's close
+        }
+    )
+    result = ind.bearish_engulfing(df)
+    assert bool(result.iloc[1]) is False
+
+
+def test_bearish_engulfing_false_when_prior_bar_not_bullish():
+    df = pd.DataFrame(
+        {
+            "open": [1.05, 1.05],
+            "high": [1.06, 1.06],
+            "low": [0.94, 0.94],
+            "close": [1.00, 0.95],  # both bars red -- no bullish bar to engulf
+        }
+    )
+    result = ind.bearish_engulfing(df)
+    assert bool(result.iloc[1]) is False
+
+
+# -- rsi_divergence -----------------------------------------------------------
+
+
+def test_rsi_divergence_flags_bearish_case():
+    lookback = 5
+    close = pd.Series([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.05, 1.08, 1.10, 1.12, 1.15])
+    rsi_series = pd.Series([50.0, 50.0, 50.0, 50.0, 50.0, 70.0, 68.0, 66.0, 64.0, 62.0, 60.0])
+
+    bearish, bullish = ind.rsi_divergence(close, rsi_series, lookback=lookback)
+
+    assert bool(bearish.iloc[10]) is True
+    assert bool(bullish.iloc[10]) is False
+
+
+def test_rsi_divergence_flags_bullish_case():
+    lookback = 5
+    close = pd.Series([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 0.95, 0.92, 0.90, 0.88, 0.85])
+    rsi_series = pd.Series([50.0, 50.0, 50.0, 50.0, 50.0, 30.0, 32.0, 34.0, 36.0, 38.0, 40.0])
+
+    bearish, bullish = ind.rsi_divergence(close, rsi_series, lookback=lookback)
+
+    assert bool(bullish.iloc[10]) is True
+    assert bool(bearish.iloc[10]) is False
+
+
+def test_rsi_divergence_no_signal_when_price_and_rsi_agree():
+    """A healthy trend -- price and RSI both making fresh highs together
+    -- is not divergence and must not be flagged as such."""
+    lookback = 5
+    close = pd.Series([1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.05, 1.08, 1.10, 1.12, 1.15])
+    rsi_series = pd.Series([50.0, 50.0, 50.0, 50.0, 50.0, 55.0, 58.0, 61.0, 64.0, 67.0, 70.0])
+
+    bearish, bullish = ind.rsi_divergence(close, rsi_series, lookback=lookback)
+
+    assert bool(bearish.iloc[10]) is False
+    assert bool(bullish.iloc[10]) is False

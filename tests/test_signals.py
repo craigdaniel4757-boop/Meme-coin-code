@@ -21,6 +21,7 @@ from bot.data.models import IndicatorSnapshot, SignalAction
 from bot.strategy.base import StrategyContext
 from bot.strategy.signals import (
     STRATEGIES,
+    bollinger_squeeze_breakout,
     momentum_breakout,
     run_strategies,
     trend_pullback,
@@ -125,6 +126,55 @@ def test_trend_pullback_requires_rsi_in_pullback_zone():
 def test_trend_pullback_requires_bullish_ema_stack():
     ind = _uptrend_snapshot(ema_fast=0.90, ema_mid=0.95, ema_slow=0.85)  # fast < mid -- not aligned
     assert trend_pullback(_ctx(ind)) is None
+
+
+# -- bollinger_squeeze_breakout ------------------------------------------------
+
+
+def test_bollinger_squeeze_breakout_fires_on_expansion_above_upper_band():
+    ind = IndicatorSnapshot(
+        price=1.20, bb_upper=1.15, bb_bandwidth=12.0, bb_bandwidth_min_recent=5.0,
+        volume_zscore=1.5, num_candles=150,
+    )
+    signal = bollinger_squeeze_breakout(_ctx(ind))
+    assert signal is not None
+    assert signal.action == SignalAction.BUY
+    assert signal.strategy_name == "bollinger_squeeze_breakout"
+    assert 0.0 <= signal.confidence <= 1.0
+
+
+def test_bollinger_squeeze_breakout_requires_sufficient_expansion():
+    ind = IndicatorSnapshot(
+        # bandwidth only 1.2x its recent low -- below the default 1.8x expansion_multiple
+        price=1.20, bb_upper=1.15, bb_bandwidth=6.0, bb_bandwidth_min_recent=5.0,
+        volume_zscore=1.5, num_candles=150,
+    )
+    assert bollinger_squeeze_breakout(_ctx(ind)) is None
+
+
+def test_bollinger_squeeze_breakout_requires_price_above_upper_band():
+    ind = IndicatorSnapshot(
+        price=1.10, bb_upper=1.15, bb_bandwidth=12.0, bb_bandwidth_min_recent=5.0,
+        volume_zscore=1.5, num_candles=150,
+    )
+    assert bollinger_squeeze_breakout(_ctx(ind)) is None
+
+
+def test_bollinger_squeeze_breakout_requires_recent_squeeze_data():
+    ind = IndicatorSnapshot(
+        price=1.20, bb_upper=1.15, bb_bandwidth=12.0, bb_bandwidth_min_recent=None, num_candles=150
+    )
+    assert bollinger_squeeze_breakout(_ctx(ind)) is None
+
+
+def test_bollinger_squeeze_breakout_respects_custom_params():
+    ind = IndicatorSnapshot(
+        price=1.20, bb_upper=1.15, bb_bandwidth=6.0, bb_bandwidth_min_recent=5.0,
+        volume_zscore=1.5, num_candles=150,
+    )
+    # 1.2x expansion fails the default 1.8x bar but passes a relaxed 1.1x one
+    signal = bollinger_squeeze_breakout(_ctx(ind, params={"bollinger_squeeze_breakout": {"expansion_multiple": 1.1}}))
+    assert signal is not None
 
 
 # -- run_strategies -------------------------------------------------------------

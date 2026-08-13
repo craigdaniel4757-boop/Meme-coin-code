@@ -55,6 +55,13 @@ class RiskConfig:
     # already turned against the base-timeframe signal.
     require_higher_timeframe_confirmation: bool = True
     higher_timeframe_seconds: int = 3600
+    # Exit on a bearish reversal pattern (engulfing candle or RSI
+    # divergence -- see bot/analysis/indicators.py) once a position is up
+    # at least this much, protecting real gains against a sharp reversal
+    # instead of riding it all the way back down to the stop-loss or
+    # giving it all back before the trailing stop even arms.
+    require_reversal_exit: bool = True
+    reversal_exit_min_gain_pct: float = 15.0
 
 
 @dataclass(slots=True)
@@ -69,7 +76,7 @@ class PositionSizeResult:
 class ExitAction:
     fraction: float  # fraction of the position's *original* quantity to sell now
     reason: str
-    kind: str  # "stop_loss" | "take_profit" | "trailing_stop" | "max_hold"
+    kind: str  # "liquidity_crash" | "stop_loss" | "trailing_stop" | "reversal" | "take_profit" | "max_hold"
 
 
 def can_open_new_position(open_positions_count: int, cfg: RiskConfig) -> bool:
@@ -147,10 +154,18 @@ def evaluate_exits(
     cfg: RiskConfig,
     now: float | None = None,
     liquidity_trend: LiquidityTrend | None = None,
+    bearish_reversal: bool = False,
 ) -> list[ExitAction]:
-    """Check liquidity crash, stop-loss, trailing stop, take-profit ladder,
-    and max-hold timer, in that priority order, and return the exit
-    actions to execute this cycle.
+    """Check liquidity crash, stop-loss, trailing stop, bearish-reversal,
+    take-profit ladder, and max-hold timer, in that priority order, and
+    return the exit actions to execute this cycle.
+
+    `bearish_reversal` is a single pre-combined signal (bearish engulfing
+    candle OR bearish RSI divergence, see bot/analysis/indicators.py) --
+    deliberately passed in as one bool rather than a full IndicatorSnapshot
+    so this module stays decoupled from the indicators module's surface,
+    the same way `liquidity_trend` is a narrow, purpose-built value rather
+    than the whole DexPair.
 
     Mutates `position` in place: updates `high_water_mark`, arms/tightens
     `trailing_stop_price`, and marks ladder rungs `filled` as they trigger.
@@ -193,6 +208,21 @@ def evaluate_exits(
         candidate = position.high_water_mark * (1 - cfg.trailing_stop_distance_pct / 100)
         if position.trailing_stop_price is None or candidate > position.trailing_stop_price:
             position.trailing_stop_price = candidate
+
+    # A confirmed reversal pattern warrants exiting the *full* remaining
+    # position immediately, same severity as a trailing-stop hit -- worth
+    # taking a real, already-earned gain off the table rather than betting
+    # it survives back-and-forth against a specific bearish pattern.
+    # Gated on a minimum gain so this doesn't whipsaw out of a trade on
+    # noise right after entry, before the position has proven itself.
+    if cfg.require_reversal_exit and bearish_reversal and gain_pct >= cfg.reversal_exit_min_gain_pct:
+        return [
+            ExitAction(
+                fraction=remaining,
+                reason=f"bearish reversal pattern while up {gain_pct:.1f}%",
+                kind="reversal",
+            )
+        ]
 
     actions: list[ExitAction] = []
     for level in position.take_profit_levels:

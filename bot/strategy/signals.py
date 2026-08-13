@@ -1,10 +1,11 @@
 """Entry-signal strategies.
 
-Three independent, well-established patterns rather than one "magic"
+Four independent, well-established patterns rather than one "magic"
 model -- each captures a different, well-documented reason a meme coin
-moves. All three can fire on the same candidate; the scanner treats any one
-BUY signal (combined with a passing composite score) as tradeable. See
-docs/STRATEGY.md for the full rationale and known failure modes of each.
+moves. All four can fire on the same candidate; the scanner treats
+`risk.min_agreeing_strategies` of them agreeing (default 1 -- any one) as
+tradeable. See docs/STRATEGY.md for the full rationale and known failure
+modes of each.
 
 - `momentum_breakout`: price breaks above its recent trading range on a
   volume spike -- the classic "something just happened" breakout entry.
@@ -14,6 +15,12 @@ docs/STRATEGY.md for the full rationale and known failure modes of each.
 - `trend_pullback`: buy a shallow dip within an already-confirmed uptrend,
   rather than chasing strength -- usually the better risk/reward of the
   three, at the cost of firing less often.
+- `bollinger_squeeze_breakout`: enters on the *initial* expansion out of a
+  low-volatility squeeze, rather than a move already underway -- a
+  volatility contraction (tight Bollinger bands) frequently precedes a
+  sharp directional move, and catching it right as it starts is a higher-
+  quality setup than the other two breakout strategies' "already moving"
+  entries, at the cost of needing a genuine prior squeeze to fire at all.
 """
 
 from __future__ import annotations
@@ -122,10 +129,48 @@ def trend_pullback(ctx: StrategyContext) -> Signal | None:
     )
 
 
+def bollinger_squeeze_breakout(ctx: StrategyContext) -> Signal | None:
+    ind = ctx.indicators
+    p = ctx.params.get("bollinger_squeeze_breakout", {})
+    expansion_multiple = p.get("expansion_multiple", 1.8)
+    min_volume_zscore = p.get("min_volume_zscore", 1.0)
+
+    if ind.bb_bandwidth is None or ind.bb_bandwidth_min_recent is None or ind.bb_bandwidth_min_recent <= 0:
+        return None
+    if ind.bb_upper is None:
+        return None
+
+    expansion_ratio = ind.bb_bandwidth / ind.bb_bandwidth_min_recent
+    if expansion_ratio < expansion_multiple:
+        return None  # bandwidth hasn't actually expanded out of the recent squeeze yet
+    if ind.price <= ind.bb_upper:
+        return None  # expansion alone isn't a signal -- require a genuine break above the upper band
+    if ind.volume_zscore is not None and ind.volume_zscore < min_volume_zscore:
+        return None
+
+    confidence = _clamp01(0.4 + min(expansion_ratio, 4.0) / 10 + min(ind.volume_zscore or 0.0, 5) / 20)
+
+    return Signal(
+        chain_id=ctx.pair.chainId,
+        pair_address=ctx.pair.pairAddress,
+        symbol=ctx.pair.symbol,
+        action=SignalAction.BUY,
+        strategy_name="bollinger_squeeze_breakout",
+        confidence=confidence,
+        reason=(
+            f"broke above the upper Bollinger band on a volatility expansion out of a squeeze "
+            f"({expansion_ratio:.1f}x the recent low bandwidth)"
+        ),
+        price=ind.price,
+        timestamp=time.time(),
+    )
+
+
 STRATEGIES: dict[str, StrategyFn] = {
     "momentum_breakout": momentum_breakout,
     "volume_spike_breakout": volume_spike_breakout,
     "trend_pullback": trend_pullback,
+    "bollinger_squeeze_breakout": bollinger_squeeze_breakout,
 }
 
 

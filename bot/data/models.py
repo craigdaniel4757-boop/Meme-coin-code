@@ -190,6 +190,7 @@ class IndicatorSnapshot:
     bb_mid: Optional[float] = None
     bb_lower: Optional[float] = None
     bb_bandwidth: Optional[float] = None
+    bb_bandwidth_min_recent: Optional[float] = None
     atr: Optional[float] = None
     atr_pct: Optional[float] = None
     volume_zscore: Optional[float] = None
@@ -197,6 +198,9 @@ class IndicatorSnapshot:
     swing_low: Optional[float] = None
     ema_fast_slope: Optional[float] = None
     vwap: Optional[float] = None
+    bearish_divergence: bool = False
+    bullish_divergence: bool = False
+    bearish_engulfing: bool = False
     num_candles: int = 0
 
 

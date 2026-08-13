@@ -120,16 +120,22 @@ class IndicatorsYamlConfig(BaseModel):
 
 
 class StrategyYamlConfig(BaseModel):
-    active: list[str] = Field(default_factory=lambda: ["momentum_breakout", "volume_spike_breakout", "trend_pullback"])
+    active: list[str] = Field(
+        default_factory=lambda: [
+            "momentum_breakout", "volume_spike_breakout", "trend_pullback", "bollinger_squeeze_breakout",
+        ]
+    )
     momentum_breakout: dict = Field(default_factory=dict)
     volume_spike_breakout: dict = Field(default_factory=dict)
     trend_pullback: dict = Field(default_factory=dict)
+    bollinger_squeeze_breakout: dict = Field(default_factory=dict)
 
     def params_dict(self) -> dict:
         return {
             "momentum_breakout": self.momentum_breakout,
             "volume_spike_breakout": self.volume_spike_breakout,
             "trend_pullback": self.trend_pullback,
+            "bollinger_squeeze_breakout": self.bollinger_squeeze_breakout,
         }
 
 
@@ -151,6 +157,8 @@ class RiskYamlConfig(BaseModel):
     min_agreeing_strategies: int = 1
     require_higher_timeframe_confirmation: bool = True
     higher_timeframe_seconds: int = 3600
+    require_reversal_exit: bool = True
+    reversal_exit_min_gain_pct: float = 15.0
 
 
 class MarketRegimeYamlConfig(BaseModel):
@@ -291,6 +299,8 @@ def build_risk_config(cfg: AppConfig) -> RiskConfig:
         min_agreeing_strategies=r.min_agreeing_strategies,
         require_higher_timeframe_confirmation=r.require_higher_timeframe_confirmation,
         higher_timeframe_seconds=r.higher_timeframe_seconds,
+        require_reversal_exit=r.require_reversal_exit,
+        reversal_exit_min_gain_pct=r.reversal_exit_min_gain_pct,
     )
 
 

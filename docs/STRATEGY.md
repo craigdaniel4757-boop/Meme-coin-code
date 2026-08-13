@@ -43,7 +43,7 @@ explainable (`ScoreBreakdown.notes`):
 | Factor | Default weight | What it measures |
 |---|---|---|
 | Trend | 25% | EMA(9/21/50) stack alignment + EMA9 slope (rolling VWAP position noted, not scored) |
-| Momentum | 20% | RSI zone + MACD histogram level/direction |
+| Momentum | 20% | RSI zone + MACD histogram level/direction + RSI/price divergence |
 | Volume | 20% | Volume z-score spike + buy/sell pressure + volume/liquidity health (incl. an average-trade-size wash-trading check) |
 | Volatility | 10% | ATR% of price — too low is dead, too high is unmanageable |
 | Liquidity/safety | 15% | Liquidity depth, FDV/liquidity ratio, pair age, safety-gate pass rate, holder concentration (Solana) |
@@ -57,6 +57,19 @@ shapes of the same underlying problem -- a healthy-looking ratio can still
 come from a handful of abnormally large trades rather than the many small
 ones real retail activity on a meme coin typically produces, which the
 ratio alone doesn't distinguish but the average-trade-size check does.
+
+The momentum factor includes RSI/price divergence
+(`bot/analysis/indicators.py`'s `rsi_divergence`): price making a fresh
+high while RSI reads *lower* than it did the last time price was up here
+(bearish divergence) knocks momentum down, since it means the move is
+running out of steam even as price pushes higher; the mirror image on the
+downside (bullish divergence) pushes momentum up. This is a simplified,
+fully vectorizable approximation of textbook divergence -- it compares
+the current bar directly against the bar `swing_lookback` bars back
+rather than running a true peak-finding pass across multiple intermediate
+swings, which is a reasonable trade of some precision for something that
+computes over an entire series in one pass instead of needing bar-by-bar
+peak detection.
 
 Why these weights: trend and momentum dominate because they're the most
 directly predictive of near-term continuation, which is what the
@@ -145,13 +158,20 @@ safety.
 
 ## 4. Entry strategies (`bot/strategy/signals.py`)
 
-Three independent, well-established technical patterns. By default any
+Before any strategy runs, discovery consolidates multi-pool tokens down
+to their single most-liquid pool (`Scanner._consolidate_by_token` in
+`bot/scanner/screener.py`) -- a token trading on more than one DEX would
+otherwise show up as several independently-scored candidates with split,
+diluted-looking liquidity and volume numbers, rather than one clean,
+representative reading.
+
+Four independent, well-established technical patterns. By default any
 one BUY signal (combined with a passing score) is enough to be considered
 tradeable; raise `risk.min_agreeing_strategies` to require more of them to
 agree before entering. That trades fewer, higher-conviction entries for a
 lower reliance on any single strategy's known false positives — worth
 doing given `volume_spike_breakout` below is documented as having the
-highest false-positive rate of the three on its own.
+highest false-positive rate of the group on its own.
 
 - **`momentum_breakout`** — price closes above its N-bar swing high on a
   volume spike, with MACD histogram non-negative. The classic "something
@@ -163,14 +183,24 @@ highest false-positive rate of the three on its own.
   fires on a sharp volume z-score spike plus a positive 5-minute price
   move, before a clean range breakout has necessarily formed. Catches
   moves earlier than `momentum_breakout`; also has the highest false-
-  positive rate of the three, since a volume spike alone doesn't
+  positive rate of the group, since a volume spike alone doesn't
   distinguish real accumulation from one large buyer.
 - **`trend_pullback`** — only fires within a confirmed uptrend (bullish
   EMA stack, price still above the slow EMA) when RSI has pulled back into
   a defined "buy the dip" zone. This is usually the best risk/reward of
-  the three — you're buying a discount within an established move instead
+  the group — you're buying a discount within an established move instead
   of chasing strength — at the cost of firing far less often, since it
   needs an uptrend to already exist.
+- **`bollinger_squeeze_breakout`** — fires when Bollinger bandwidth has
+  expanded to at least `expansion_multiple` (default 1.8x) times its
+  recent low *and* price breaks above the upper band. A volatility
+  squeeze (tight bands) frequently precedes a sharp directional move, so
+  catching the initial expansion out of one is a higher-quality setup
+  than the other breakout strategies' "already moving" entries — at the
+  cost of needing a genuine prior squeeze to fire at all, so it triggers
+  less often than `momentum_breakout`/`volume_spike_breakout`. Uses a
+  lower volume-confirmation bar than those two, since volume sometimes
+  follows price rather than leading it out of a squeeze.
 
 **Two more checks run only at the point of actually entering a trade** —
 not for every candidate scanned, so API load stays bounded to real signals
@@ -237,6 +267,14 @@ rather than the hundreds of candidates a cycle might discover:
   gain, then trails `trailing_stop_distance_pct` behind the high-water
   mark — protects the back half of a big winner without capping its
   upside the way a fixed take-profit would.
+- **Reversal-pattern exit**: exits the *full* remaining position -- same
+  priority as a trailing-stop hit -- when a bearish reversal signal
+  (a bearish engulfing candle or bearish RSI divergence, see
+  `bot/analysis/indicators.py`) fires while a position is up at least
+  `reversal_exit_min_gain_pct` (default 15%). Gated on a minimum gain so
+  it can't whipsaw a position out on noise right after entry, before it's
+  proven itself; the point is protecting a real, already-earned gain
+  against a sharp reversal, not reacting to every red candle.
 - **Max hold timer**: closes out anything that's gone nowhere after
   `max_hold_minutes` — capital sitting in a dead trade is capital not
   available for the next real signal.
@@ -291,6 +329,17 @@ that:
   fetching a genuinely independent higher-timeframe series the way live
   scanning does -- a reasonable stand-in, not an exact match for what a
   real 1h candle from the exchange would have looked like at that moment.
+- **Identical, not approximated**: RSI/price divergence, the bearish
+  engulfing pattern, the Bollinger squeeze breakout strategy, and the
+  reversal-pattern exit (§2, §4, §5) are all pure functions of the OHLCV
+  window itself, computed by the exact same indicator code live scanning
+  uses -- nothing about them changes or needs approximating in a
+  backtest.
+- **Not applicable, not skipped**: multi-pool consolidation (§4) is a
+  *discovery*-time concept -- there's no discovery phase in a backtest at
+  all, since it already replays one specific, pre-selected pool. This
+  isn't a gap the way the checks above are; it's simply a question that
+  doesn't arise outside live/paper scanning.
 
 Read the rest of the caveats in `bot/backtest/engine.py`'s docstring
 before trusting a result: fills happen at the current bar's close (no

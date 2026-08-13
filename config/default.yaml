@@ -128,7 +128,7 @@ indicators:
 # score.
 # ------------------------------------------------------------------------------
 strategy:
-  active: ["momentum_breakout", "volume_spike_breakout", "trend_pullback"]
+  active: ["momentum_breakout", "volume_spike_breakout", "trend_pullback", "bollinger_squeeze_breakout"]
   momentum_breakout:
     breakout_lookback: 20
     min_volume_zscore: 1.5
@@ -138,6 +138,9 @@ strategy:
   trend_pullback:
     rsi_pullback_low: 38
     rsi_pullback_high: 52
+  bollinger_squeeze_breakout:
+    expansion_multiple: 1.8    # bandwidth must widen to this multiple of its recent squeeze low
+    min_volume_zscore: 1.0     # lower bar than the other breakout strategies -- volume often follows price here
 
 # ------------------------------------------------------------------------------
 # Risk management -- applies identically to paper and live execution
@@ -167,6 +170,13 @@ risk:
   # fewer, higher-conviction entries for a lower reliance on any single
   # strategy's known false positives. See docs/STRATEGY.md section 4.
   min_agreeing_strategies: 1
+  # Exit on a bearish reversal pattern (engulfing candle or RSI divergence)
+  # once a position is up at least this much -- protects real gains
+  # against a sharp reversal instead of riding it back down. Gated on a
+  # minimum gain so it doesn't whipsaw out of a trade on noise right after
+  # entry, before the position has proven itself.
+  require_reversal_exit: true
+  reversal_exit_min_gain_pct: 15.0
   # Final check, only at the point of actually entering, that a higher
   # timeframe's trend hasn't already turned against the entry signal.
   # Fails open (never blocks) for a coin too young to have a meaningful

@@ -119,6 +119,60 @@ def slope_pct(series: pd.Series, lookback: int = 5) -> pd.Series:
     return (series - base) / base.replace(0, np.nan) * 100
 
 
+def rolling_bandwidth_min(bandwidth: pd.Series, lookback: int = 20) -> pd.Series:
+    """Lowest Bollinger bandwidth of the `lookback` bars *preceding* the
+    current one -- how tight the most recent volatility squeeze was,
+    excluding the current bar itself so a strategy can compare "now" against
+    "the squeeze that just happened" rather than against itself."""
+    return bandwidth.shift(1).rolling(lookback).min()
+
+
+def rsi_divergence(close: pd.Series, rsi_series: pd.Series, lookback: int = 20) -> tuple[pd.Series, pd.Series]:
+    """Bearish/bullish RSI divergence, as boolean series.
+
+    A simplified, fully vectorizable approximation of textbook divergence
+    (which compares price/RSI at two *confirmed swing points*, needing a
+    peak-finding pass): this instead compares the current bar directly
+    against the bar exactly `lookback` bars back, gated on the current bar
+    being at -- or within a hair of -- a fresh extreme over that same
+    window. Close enough to "the current vs. the prior swing" for a scan-
+    time filter without a full peak-finding algorithm, at the cost of not
+    handling multiple intermediate peaks as precisely as the textbook
+    version would.
+
+    Bearish: price makes a higher high than `lookback` bars ago while RSI
+    reads *lower* than it did then, both while RSI is still in a bullish
+    zone (>55) -- momentum fading even as price pushes to a fresh high.
+    Bullish: the mirror image on the downside (fresh low, RSI higher than
+    then, both <45).
+    """
+    price_prior = close.shift(lookback)
+    rsi_prior = rsi_series.shift(lookback)
+    rolling_high = close.rolling(lookback).max()
+    rolling_low = close.rolling(lookback).min()
+    near_high = close >= rolling_high * 0.999
+    near_low = close <= rolling_low * 1.001
+
+    bearish = near_high & (close > price_prior) & (rsi_series < rsi_prior) & (rsi_series > 55) & (rsi_prior > 55)
+    bullish = near_low & (close < price_prior) & (rsi_series > rsi_prior) & (rsi_series < 45) & (rsi_prior < 45)
+    return bearish.fillna(False), bullish.fillna(False)
+
+
+def bearish_engulfing(df: pd.DataFrame) -> pd.Series:
+    """True at bar i if it's a bearish (red) candle whose body fully
+    engulfs the prior bar's bullish (green) body -- a classic single-bar-
+    confirmed reversal pattern, used as one of the reversal-exit triggers
+    in bot/strategy/risk_manager.py."""
+    open_ = df["open"].astype(float)
+    close = df["close"].astype(float)
+    prev_open = open_.shift(1)
+    prev_close = close.shift(1)
+    prev_bullish = prev_close > prev_open
+    current_bearish = close < open_
+    engulfs = (open_ >= prev_close) & (close <= prev_open)
+    return (prev_bullish & current_bearish & engulfs).fillna(False)
+
+
 def rolling_vwap(df: pd.DataFrame, period: int = 20) -> pd.Series:
     """Rolling (not session-based -- meme coins trade 24/7 with no natural
     session open) volume-weighted average price over `period` bars: a
@@ -168,7 +222,9 @@ def compute_indicator_series(df: pd.DataFrame, params: IndicatorParams) -> pd.Da
     out["bb_upper"] = bb_upper
     out["bb_mid"] = bb_mid
     out["bb_lower"] = bb_lower
-    out["bb_bandwidth"] = (bb_upper - bb_lower) / bb_mid.replace(0, np.nan) * 100
+    bandwidth = (bb_upper - bb_lower) / bb_mid.replace(0, np.nan) * 100
+    out["bb_bandwidth"] = bandwidth
+    out["bb_bandwidth_min_recent"] = rolling_bandwidth_min(bandwidth, params.bollinger_period)
     out["atr"] = atr_s
     out["atr_pct"] = atr_s / close.replace(0, np.nan) * 100
     out["volume_zscore"] = zscore(volume, params.volume_zscore_period)
@@ -176,6 +232,13 @@ def compute_indicator_series(df: pd.DataFrame, params: IndicatorParams) -> pd.Da
     out["swing_low"] = rolling_swing_low(df, params.swing_lookback)
     out["ema_fast_slope"] = slope_pct(ema_f, lookback=5)
     out["vwap"] = rolling_vwap(df, params.vwap_period)
+
+    rsi_s = out["rsi"]
+    bearish_div, bullish_div = rsi_divergence(close, rsi_s, params.swing_lookback)
+    out["bearish_divergence"] = bearish_div
+    out["bullish_divergence"] = bullish_div
+    out["bearish_engulfing"] = bearish_engulfing(df)
+
     out["num_candles"] = np.arange(1, len(df) + 1)
     return out
 
@@ -186,6 +249,10 @@ def snapshot_from_series_row(series_df: pd.DataFrame, i: int) -> IndicatorSnapsh
     def val(name: str) -> float | None:
         v = row.get(name)
         return float(v) if v is not None and pd.notna(v) else None
+
+    def bool_val(name: str) -> bool:
+        v = row.get(name)
+        return bool(v) if v is not None and pd.notna(v) else False
 
     return IndicatorSnapshot(
         price=float(row["price"]),
@@ -201,6 +268,7 @@ def snapshot_from_series_row(series_df: pd.DataFrame, i: int) -> IndicatorSnapsh
         bb_mid=val("bb_mid"),
         bb_lower=val("bb_lower"),
         bb_bandwidth=val("bb_bandwidth"),
+        bb_bandwidth_min_recent=val("bb_bandwidth_min_recent"),
         atr=val("atr"),
         atr_pct=val("atr_pct"),
         volume_zscore=val("volume_zscore"),
@@ -208,6 +276,9 @@ def snapshot_from_series_row(series_df: pd.DataFrame, i: int) -> IndicatorSnapsh
         swing_low=val("swing_low"),
         ema_fast_slope=val("ema_fast_slope"),
         vwap=val("vwap"),
+        bearish_divergence=bool_val("bearish_divergence"),
+        bullish_divergence=bool_val("bullish_divergence"),
+        bearish_engulfing=bool_val("bearish_engulfing"),
         num_candles=int(row["num_candles"]),
     )
 

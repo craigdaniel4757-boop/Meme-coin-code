@@ -20,7 +20,9 @@ activity — it does not, and cannot, guarantee profit.
 1. **Discovers candidates** — pulls DexScreener's latest/top boosted
    tokens, latest token profiles, configurable search terms, and any
    explicit watchlist entries, across whichever chains you configure
-   (Solana, Ethereum, Base, BSC by default).
+   (Solana, Ethereum, Base, BSC by default), then consolidates any token
+   trading on more than one DEX down to its single most-liquid pool so it
+   isn't scored as several separate, split-liquidity candidates.
 2. **Filters hard** — liquidity, volume, pair age, and transaction-count
    floors remove obvious junk before any analysis runs. Hundreds of raw
    candidates typically collapse to a few dozen worth scoring.
@@ -39,15 +41,17 @@ activity — it does not, and cannot, guarantee profit.
    that fails a hard gate is dropped regardless of how good its chart
    looks. See `bot/analysis/safety_filters.py`.
 5. **Scores what's left** — a weighted 0-100 composite of trend
-   (EMA stack + slope), momentum (RSI + MACD), volume (z-score + buy/sell
-   pressure), volatility (ATR/Bollinger width), liquidity/safety, and
+   (EMA stack + slope), momentum (RSI + MACD + RSI/price divergence),
+   volume (z-score + buy/sell pressure + two independent wash-trading
+   checks), volatility (ATR/Bollinger width), liquidity/safety, and
    social presence. Every score comes with a factor-by-factor breakdown,
    not just a number.
-6. **Generates signals** from three independent strategies (momentum
-   breakout, volume-spike breakout, trend pullback) — see
-   `docs/STRATEGY.md` for the exact rules each one trades. By default any
-   one strategy's BUY signal is enough; raise `risk.min_agreeing_strategies`
-   to require several to agree before entering.
+6. **Generates signals** from four independent strategies (momentum
+   breakout, volume-spike breakout, trend pullback, Bollinger squeeze
+   breakout) — see `docs/STRATEGY.md` for the exact rules each one
+   trades. By default any one strategy's BUY signal is enough; raise
+   `risk.min_agreeing_strategies` to require several to agree before
+   entering.
 7. **Confirms before entering** — two more checks run only at the point of
    actually placing a trade (not for every candidate scanned): a
    multi-timeframe trend check that a higher timeframe hasn't already
@@ -57,10 +61,12 @@ activity — it does not, and cannot, guarantee profit.
 8. **Sizes and manages risk** — fixed-fractional position sizing off your
    configured bankroll, per-token exposure caps, a hard stop-loss, a
    staged take-profit ladder, an ATR-aware trailing stop once a position
-   is sufficiently in profit, a max-hold timer, a liquidity-crash
-   emergency exit that overrides every other rule (including the
-   stop-loss) if a held position's liquidity craters, and a daily-loss
-   circuit breaker that halts new entries for the day.
+   is sufficiently in profit, a reversal-pattern exit that closes out a
+   profitable position on a bearish engulfing candle or RSI divergence,
+   a max-hold timer, a liquidity-crash emergency exit that overrides
+   every other rule (including the stop-loss) if a held position's
+   liquidity craters, and a daily-loss circuit breaker that halts new
+   entries for the day.
 9. **Executes** — in paper mode (default) against a fully simulated
    portfolio with configurable slippage/fees, or in live mode as real
    swaps signed and sent through Jupiter on Solana.
@@ -126,13 +132,13 @@ bot/data/        DexScreener + GeckoTerminal clients, Solana on-chain checks
                   (mint/freeze authority, holder concentration), Jupiter
                   sellability probe, local candle store, rate limiting,
                   typed models
-bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/VWAP/swings),
-                  composite scoring model, hard safety filters,
-                  liquidity-crash detector, multi-timeframe confirmation,
-                  market-regime filter
+bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/VWAP/swings,
+                  RSI divergence, bearish engulfing), composite scoring
+                  model, hard safety filters, liquidity-crash detector,
+                  multi-timeframe confirmation, market-regime filter
 bot/strategy/     Signal-generating strategies + the risk manager
                   (sizing, stop-loss, take-profit ladder, trailing stop,
-                  circuit breaker)
+                  reversal-pattern exit, circuit breaker)
 bot/execution/    Portfolio bookkeeping, paper execution (default),
                   live Jupiter execution (opt-in)
 bot/scanner/      The continuous scan -> filter -> score -> signal ->

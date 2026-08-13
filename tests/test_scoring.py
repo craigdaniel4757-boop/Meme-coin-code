@@ -5,6 +5,8 @@ there is no single "correct" score for a given input.
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from bot.analysis.safety_filters import SafetyConfig, evaluate_safety
@@ -171,3 +173,27 @@ def test_large_average_trade_size_scores_worse_than_normal():
     suspicious_score = compute_score(suspicious, _bullish_indicators(), safety_suspicious, ScoringWeights())
 
     assert suspicious_score.volume < normal_score.volume
+
+
+def test_bearish_divergence_lowers_momentum_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _bullish_indicators(), safety, ScoringWeights())
+    diverging = compute_score(
+        pair, dataclasses.replace(_bullish_indicators(), bearish_divergence=True), safety, ScoringWeights()
+    )
+
+    assert diverging.momentum < plain.momentum
+    assert any("bearish RSI divergence" in note for note in diverging.notes)
+
+
+def test_bullish_divergence_raises_momentum_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _bearish_indicators(), safety, ScoringWeights())
+    diverging = compute_score(
+        pair, dataclasses.replace(_bearish_indicators(), bullish_divergence=True), safety, ScoringWeights()
+    )
+
+    assert diverging.momentum > plain.momentum
+    assert any("bullish RSI divergence" in note for note in diverging.notes)

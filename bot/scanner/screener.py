@@ -5,6 +5,7 @@ Jupiter) and runs a bounded-concurrency pipeline over however many
 candidates discovery turns up each cycle:
 
   discover (boosts/profiles/search/watchlist)
+    -> consolidate multi-pool tokens down to their most-liquid pool
     -> cheap pre-filter (liquidity/volume/age/activity, no network)
     -> per-candidate: candles -> indicators -> on-chain/liquidity/sellability
        checks -> safety gate -> composite score -> strategies
@@ -65,6 +66,25 @@ logger = logging.getLogger(__name__)
 def _start_of_day_ts() -> float:
     now = datetime.now(timezone.utc)
     return now.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+
+
+def _consolidate_by_token(pairs: list[DexPair]) -> list[DexPair]:
+    """Keep only the highest-liquidity pool per underlying token. A token
+    trading on more than one DEX (e.g. both a Raydium and an Orca pool)
+    would otherwise show up as two independently-scored candidates with
+    split, diluted-looking liquidity/volume numbers -- picking whichever
+    pool is actually most liquid gives one clean, representative reading
+    per token instead. Falls back to keying by the pair itself (never
+    consolidating) when `baseToken.address` is missing, so pairs with
+    incomplete data don't get incorrectly merged together under an empty
+    key."""
+    best_by_token: dict[str, DexPair] = {}
+    for p in pairs:
+        token_key = f"{p.chainId}:{p.baseToken.address}" if p.baseToken.address else p.key
+        current_best = best_by_token.get(token_key)
+        if current_best is None or (p.liquidity.usd or 0.0) > (current_best.liquidity.usd or 0.0):
+            best_by_token[token_key] = p
+    return list(best_by_token.values())
 
 
 class Scanner:
@@ -182,7 +202,8 @@ class Scanner:
             if pair is not None:
                 add_pairs([pair])
 
-        return list(seen.values())[: self.cfg.scanner.max_candidates_per_cycle]
+        consolidated = _consolidate_by_token(list(seen.values()))
+        return consolidated[: self.cfg.scanner.max_candidates_per_cycle]
 
     def _passes_prefilter(self, pair: DexPair) -> bool:
         sc = self.cfg.scanner
@@ -318,7 +339,23 @@ class Scanner:
             if not price or price <= 0:
                 continue
             liquidity_trend = compute_liquidity_trend(self.db, position.chain_id, position.pair_address)
-            for action in evaluate_exits(position, price, self.risk_cfg, liquidity_trend=liquidity_trend):
+
+            bearish_reversal = False
+            if self.risk_cfg.require_reversal_exit:
+                # Open positions are few (max_concurrent_positions, default
+                # 6) unlike the full candidate list, so a candle fetch +
+                # indicator pass per position here is cheap -- unlike the
+                # higher-timeframe check, this doesn't need to be deferred
+                # to a rarer trigger point.
+                df = await self.candle_provider.get_candles(
+                    position.chain_id, position.pair_address, self.cfg.data.candles.fallback_interval_seconds
+                )
+                indicators = compute_indicator_snapshot(df, self.indicator_params)
+                bearish_reversal = indicators.bearish_divergence or indicators.bearish_engulfing
+
+            for action in evaluate_exits(
+                position, price, self.risk_cfg, liquidity_trend=liquidity_trend, bearish_reversal=bearish_reversal
+            ):
                 trade = await self.execution.sell(position, action.fraction, price, action.reason)
                 if trade is not None and self.cfg.notifications.notify_on_trade:
                     await notify(
