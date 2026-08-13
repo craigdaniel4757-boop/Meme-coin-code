@@ -31,6 +31,7 @@ from bot.config import (
 from bot.data.candles import CandleProvider
 from bot.data.dexscreener import DexScreenerClient
 from bot.data.geckoterminal import GeckoTerminalClient
+from bot.data.models import SignalAction
 from bot.execution.jupiter_live import JupiterLiveExecutionProvider, LiveTradingError
 from bot.execution.paper import PaperExecutionProvider
 from bot.logging_setup import setup_logging
@@ -60,30 +61,47 @@ async def _run_scan_once(cfg: AppConfig, db: Database):
 
 def _print_scan_table(candidates: list, limit: int = 25, min_score: float | None = None, show_top_notes: bool = True) -> None:
     table = Table(title=f"memebot scan -- {len(candidates)} candidates analyzed")
-    for col, justify in [
-        ("Symbol", None), ("Chain", None), ("Score", "right"), ("Safety", None),
-        ("Price", "right"), ("Liquidity", "right"), ("24h Vol", "right"), ("Signals", None),
+    for col, justify, overflow in [
+        ("Symbol", None, None), ("Chain", None, None), ("Score", "right", None), ("Safety", None, None),
+        ("Action", None, None), ("Price", "right", None), ("Liquidity", "right", None),
+        ("24h Vol", "right", None), ("Signals", None, "fold"),
     ]:
-        table.add_column(col, justify=justify or "left")
+        # "fold" wraps long content (e.g. several strategy names) onto extra
+        # lines within the cell instead of truncating it with an ellipsis.
+        table.add_column(col, justify=justify or "left", overflow=overflow or "ellipsis")
 
     shown = 0
+    links: list[tuple[str, str]] = []
     for c in candidates:
         if min_score is not None and (not c.score or c.score.total < min_score):
             continue
         score_txt = f"{c.score.total:.0f}" if c.score else "-"
         safety_txt = "[green]OK[/green]" if c.safety.passed else "[red]FAIL[/red]"
+        is_buy = any(s.action == SignalAction.BUY for s in c.signals)
+        action_txt = "[bold green]BUY[/bold green]" if is_buy else "[dim]HOLD[/dim]"
         price_txt = f"${c.pair.price_usd:.8g}" if c.pair.price_usd else "-"
         liq_txt = f"${c.pair.liquidity.usd:,.0f}" if c.pair.liquidity.usd else "-"
         vol_txt = f"${c.pair.volume.h24:,.0f}" if c.pair.volume.h24 else "-"
         signals_txt = ", ".join(s.strategy_name for s in c.signals) or "-"
         table.add_row(
-            c.pair.symbol, c.pair.chainId, score_txt, safety_txt, price_txt, liq_txt, vol_txt, signals_txt
+            c.pair.symbol, c.pair.chainId, score_txt, safety_txt, action_txt,
+            price_txt, liq_txt, vol_txt, signals_txt,
         )
+        if c.pair.url:
+            links.append((c.pair.symbol, c.pair.url))
         shown += 1
         if shown >= limit:
             break
 
     console.print(table)
+    # Printed as a plain list rather than a table column: a DexScreener URL
+    # is ~60 characters, which would force multi-line wrapping inside a
+    # bordered cell (interleaved with box-drawing characters) that's awkward
+    # to select and copy correctly. One clean line per coin is not.
+    if links:
+        console.print("\n[bold]Links:[/bold]")
+        for symbol, url in links:
+            console.print(f"  {symbol}: {url}")
     if show_top_notes and candidates and candidates[0].score:
         top = candidates[0]
         console.print(f"\n[bold]Top candidate:[/bold] {top.pair.symbol} ({top.pair.chainId}) -- score {top.score.total:.1f}")
