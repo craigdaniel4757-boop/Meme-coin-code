@@ -1,10 +1,17 @@
-"""Scanner discovery tests -- currently just the multi-pool consolidation
-helper, which is a pure function with no network/Scanner-instance
-dependency (see bot/scanner/screener.py's `_consolidate_by_token`)."""
+"""Scanner discovery tests: the multi-pool consolidation helper (a pure
+function, no network/Scanner-instance dependency), plus a check that
+running a Scanner with no execution provider attached -- the `scan --loop`
+CLI mode -- never touches position management or entry logic, no matter
+what candidates it's given (see bot/scanner/screener.py's
+`manage_open_positions`/`enter_new_positions`, and bot/cli.py's
+`_run_scan_loop`)."""
 
 from __future__ import annotations
 
-from bot.scanner.screener import _consolidate_by_token
+from bot.config import load_config
+from bot.data.models import Candidate, IndicatorSnapshot, SafetyResult, Signal, SignalAction
+from bot.scanner.screener import Scanner, _consolidate_by_token
+from bot.storage.db import Database
 from tests.conftest import make_pair
 
 
@@ -59,3 +66,47 @@ def test_different_chains_are_not_merged():
 
 def test_empty_input():
     assert _consolidate_by_token([]) == []
+
+
+# -- Scanner with no execution provider: the `scan --loop` safety property --
+
+
+def _buy_candidate() -> Candidate:
+    """A candidate that looks fully tradeable -- passed safety, carries a
+    live BUY signal -- specifically so the test below proves the
+    execution-is-None guard holds even under the case most likely to slip
+    past it, not just on an empty/boring candidate list."""
+    pair = make_pair()
+    return Candidate(
+        pair=pair,
+        candles=None,
+        indicators=IndicatorSnapshot(price=1.0, num_candles=150),
+        safety=SafetyResult(passed=True),
+        score=None,
+        signals=[
+            Signal(
+                chain_id=pair.chainId, pair_address=pair.pairAddress, symbol=pair.symbol,
+                action=SignalAction.BUY, strategy_name="momentum_breakout", confidence=0.9,
+                reason="test", price=1.0, timestamp=0.0,
+            )
+        ],
+    )
+
+
+async def test_scanner_with_no_execution_provider_never_manages_or_enters_positions(tmp_path):
+    """The exact safety property `scan --loop` (bot/cli.py's
+    `_run_scan_loop`) relies on: a Scanner built without an execution
+    provider must stay a pure, read-only reporter -- even when handed a
+    candidate carrying a live BUY signal, it must never touch a portfolio,
+    paper or live. manage_open_positions/enter_new_positions both bail out
+    on `self.execution is None` before touching the DB or any network
+    client, so this needs no mocking to verify."""
+    cfg = load_config()
+    db = Database(tmp_path / "test.db")
+    try:
+        async with Scanner(cfg, db) as scanner:
+            assert scanner.execution is None
+            await scanner.manage_open_positions()
+            await scanner.enter_new_positions([_buy_candidate()])
+    finally:
+        db.close()

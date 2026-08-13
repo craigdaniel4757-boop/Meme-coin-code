@@ -59,6 +59,17 @@ async def _run_scan_once(cfg: AppConfig, db: Database):
         return await scanner.scan_once()
 
 
+async def _run_scan_loop(cfg: AppConfig, db: Database) -> None:
+    """Same continuous cadence as `run`, minus execution entirely: a
+    Scanner with no execution provider makes `manage_open_positions`/
+    `enter_new_positions` no-ops (see bot/scanner/screener.py), so this is
+    a live-updating table only -- no portfolio, no trades, paper or live."""
+    async with Scanner(cfg, db) as scanner:
+        await scanner.run_forever(
+            on_cycle_complete=lambda candidates: _print_cycle_table(candidates, cfg.risk.min_agreeing_strategies)
+        )
+
+
 def _print_scan_table(
     candidates: list,
     limit: int = 25,
@@ -105,9 +116,9 @@ def _print_scan_table(
     console.print(table)
     if any_buy:
         console.print(
-            "[dim]BUY reflects strategy agreement, safety, and score -- two more checks (higher-timeframe "
-            "trend, market regime) are only applied right before the bot actually places a trade, and can "
-            "still hold one back.[/dim]"
+            "[dim]BUY reflects strategy agreement, safety, and score -- three more checks (higher-timeframe "
+            "trend, market regime, same-token cooldown) are only applied right before the bot actually "
+            "places a trade, and can still hold one back.[/dim]"
         )
     # Printed as a plain list rather than a table column: a DexScreener URL
     # is ~60 characters, which would force multi-line wrapping inside a
@@ -127,6 +138,20 @@ def _print_scan_table(
 def cmd_scan(args: argparse.Namespace) -> None:
     cfg = _load(args.config)
     db = Database(cfg.storage.sqlite_path)
+
+    if args.loop:
+        console.print(
+            f"[bold]Continuous scan (read-only -- no trades, paper or live).[/bold] "
+            f"Scan interval: {cfg.scanner.scan_interval_seconds}s. Ctrl+C to stop."
+        )
+        try:
+            asyncio.run(_run_scan_loop(cfg, db))
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Stopped.[/yellow]")
+        finally:
+            db.close()
+        return
+
     try:
         candidates = asyncio.run(_run_scan_once(cfg, db))
     finally:
@@ -470,6 +495,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_scan.add_argument("--limit", type=int, default=25, help="Max rows to display")
     p_scan.add_argument("--min-score", type=float, default=None, help="Only show candidates at/above this score")
+    p_scan.add_argument(
+        "--loop", action="store_true",
+        help="Keep scanning forever on the configured interval instead of running once (Ctrl+C to stop). "
+        "Never executes trades, paper or live -- a live-updating read-only report only.",
+    )
     p_scan.set_defaults(func=cmd_scan)
 
     p_run = sub.add_parser("run", help="Run the continuous scan/trade loop", parents=[common])

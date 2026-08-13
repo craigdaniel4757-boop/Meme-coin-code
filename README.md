@@ -95,6 +95,10 @@ python -m bot init-db
 # Read-only: run one discovery+scoring pass and print a ranked report.
 python -m bot scan
 
+# Same, but continuously on the configured interval -- never trades, paper
+# or live, just a live-updating table (Ctrl+C to stop).
+python -m bot scan --loop
+
 # Continuous paper trading (simulated fills, no real funds, safe to leave running).
 python -m bot run
 
