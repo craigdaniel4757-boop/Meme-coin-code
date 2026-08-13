@@ -152,6 +152,24 @@ def _volume_score(pair: DexPair, ind: IndicatorSnapshot) -> tuple[float, list[st
     else:
         health_component = 30.0
 
+    # A second, independent wash-trading signal: the volume/liquidity ratio
+    # above can look "healthy" even when that volume comes from a handful
+    # of abnormally large trades rather than many organic ones (real retail
+    # activity on a meme coin is typically lots of *small* trades). Average
+    # trade size that's a large slice of the whole pool's liquidity is a
+    # much stronger tell of self-dealing or a couple of wash trades than
+    # the raw ratio alone.
+    txns24 = pair.txns.h24
+    txns24_total = txns24.buys + txns24.sells
+    if liq > 0 and vol24 > 0 and txns24_total > 0:
+        avg_trade_pct_of_liquidity = (vol24 / txns24_total) / liq * 100
+        if avg_trade_pct_of_liquidity > 10.0:
+            health_component = max(20.0, health_component - min(40.0, (avg_trade_pct_of_liquidity - 10.0) * 3))
+            notes.append(
+                f"avg trade size unusually large ({avg_trade_pct_of_liquidity:.0f}% of liquidity per trade "
+                f"-- possible wash trading)"
+            )
+
     total = zscore_component * 0.40 + pressure_component * 0.35 + health_component * 0.25
     return total, notes
 

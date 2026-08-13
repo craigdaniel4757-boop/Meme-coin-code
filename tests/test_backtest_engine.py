@@ -161,6 +161,92 @@ def test_run_backtest_score_gate_trades_with_default_safety_cfg():
     assert len(result.trades) > 0
 
 
+# -- run_backtest: confluence (min_agreeing_strategies) ---------------------
+
+
+def test_confluence_blocks_entries_when_not_enough_strategies_agree():
+    df = make_breakout_df()
+    strict_cfg = RiskConfig(stop_loss_pct=15.0, take_profit_ladder=[(50.0, 1.0)], min_agreeing_strategies=2)
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], strict_cfg,
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+    )
+    # Only one strategy is active, so it can never reach 2 agreeing signals.
+    assert len(result.trades) == 0
+
+
+def test_confluence_default_of_one_preserves_existing_behavior():
+    df = make_breakout_df()
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], _risk_cfg(),
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+    )
+    assert len(result.trades) > 0
+
+
+def test_confluence_and_higher_timeframe_are_skipped_in_raw_mode():
+    """Raw mode (scoring_weights=None) exists to show a strategy's
+    unfiltered edge -- it must skip every quality filter, not just the
+    score gate, even when those filters are configured aggressively."""
+    df = make_breakout_df()
+    impossible_cfg = RiskConfig(
+        stop_loss_pct=15.0, take_profit_ladder=[(50.0, 1.0)],
+        min_agreeing_strategies=99, require_higher_timeframe_confirmation=True, higher_timeframe_seconds=60,
+    )
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], impossible_cfg,
+        scoring_weights=None,
+    )
+    assert len(result.trades) > 0
+
+
+# -- run_backtest: higher-timeframe confirmation -----------------------------
+
+
+def test_higher_timeframe_series_false_blocks_entries():
+    df = make_breakout_df()
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], _risk_cfg(),
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+        higher_tf_series=[False] * len(df),
+    )
+    assert len(result.trades) == 0
+
+
+def test_higher_timeframe_series_true_allows_entries():
+    df = make_breakout_df()
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], _risk_cfg(),
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+        higher_tf_series=[True] * len(df),
+    )
+    assert len(result.trades) > 0
+
+
+def test_higher_timeframe_series_none_values_fail_open():
+    df = make_breakout_df()
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], _risk_cfg(),
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+        higher_tf_series=[None] * len(df),
+    )
+    assert len(result.trades) > 0
+
+
+def test_higher_timeframe_confirmation_disabled_ignores_series():
+    df = make_breakout_df()
+    disabled_cfg = RiskConfig(
+        stop_loss_pct=15.0, take_profit_ladder=[(50.0, 1.0)], require_higher_timeframe_confirmation=False,
+    )
+    # Even an explicitly blocking series must be ignored once the flag itself is off.
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], disabled_cfg,
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+        higher_tf_series=[False] * len(df),
+    )
+    assert len(result.trades) > 0
+
+
 def test_run_backtest_score_gate_can_reject_on_failed_safety():
     df = make_breakout_df()
     strict_safety = SafetyConfig(

@@ -44,10 +44,19 @@ explainable (`ScoreBreakdown.notes`):
 |---|---|---|
 | Trend | 25% | EMA(9/21/50) stack alignment + EMA9 slope (rolling VWAP position noted, not scored) |
 | Momentum | 20% | RSI zone + MACD histogram level/direction |
-| Volume | 20% | Volume z-score spike + buy/sell pressure + volume/liquidity health |
+| Volume | 20% | Volume z-score spike + buy/sell pressure + volume/liquidity health (incl. an average-trade-size wash-trading check) |
 | Volatility | 10% | ATR% of price — too low is dead, too high is unmanageable |
 | Liquidity/safety | 15% | Liquidity depth, FDV/liquidity ratio, pair age, safety-gate pass rate, holder concentration (Solana) |
 | Social | 10% | Presence of socials/website, active DexScreener boosts |
+
+The volume factor carries two independent wash-trading signals, not one:
+the original volume/liquidity *ratio* (extreme 24h volume relative to pool
+depth) and, on top of it, *average trade size* relative to that same
+liquidity (volume ÷ 24h transaction count). The two catch different
+shapes of the same underlying problem -- a healthy-looking ratio can still
+come from a handful of abnormally large trades rather than the many small
+ones real retail activity on a meme coin typically produces, which the
+ratio alone doesn't distinguish but the average-trade-size check does.
 
 Why these weights: trend and momentum dominate because they're the most
 directly predictive of near-term continuation, which is what the
@@ -136,9 +145,13 @@ safety.
 
 ## 4. Entry strategies (`bot/strategy/signals.py`)
 
-Three independent, well-established technical patterns. Any one BUY
-signal (combined with a passing score) is enough to be considered
-tradeable — they aren't required to agree.
+Three independent, well-established technical patterns. By default any
+one BUY signal (combined with a passing score) is enough to be considered
+tradeable; raise `risk.min_agreeing_strategies` to require more of them to
+agree before entering. That trades fewer, higher-conviction entries for a
+lower reliance on any single strategy's known false positives — worth
+doing given `volume_spike_breakout` below is documented as having the
+highest false-positive rate of the three on its own.
 
 - **`momentum_breakout`** — price closes above its N-bar swing high on a
   volume spike, with MACD histogram non-negative. The classic "something
@@ -158,6 +171,42 @@ tradeable — they aren't required to agree.
   the three — you're buying a discount within an established move instead
   of chasing strength — at the cost of firing far less often, since it
   needs an uptrend to already exist.
+
+**Two more checks run only at the point of actually entering a trade** —
+not for every candidate scanned, so API load stays bounded to real signals
+rather than the hundreds of candidates a cycle might discover:
+
+- **Multi-timeframe trend confirmation** (`bot/analysis/higher_timeframe.py`,
+  config: `risk.require_higher_timeframe_confirmation`,
+  `risk.higher_timeframe_seconds`) — a breakout on the base timeframe
+  against a falling higher-timeframe trend (1h by default) is a much
+  weaker trade than the same breakout with the bigger picture still
+  pointed up; this catches a class of false positive a single-timeframe
+  view cannot see at all. Live scanning fetches the real coarser candles;
+  a backtest approximates the same thing by resampling its own historical
+  window into coarser bars (see §6). Fails *open*, not closed: a coin too
+  young to have a meaningful higher-timeframe history yet — much of what
+  this bot trades — isn't blocked on that basis. That's a deliberate
+  asymmetry with §3's safety gates: this is a trade quality/timing filter,
+  not a safety gate, so a false "confirmed" here risks a worse-timed
+  entry, not a scam.
+- **Market-regime filter** (`bot/analysis/market_regime.py`, config:
+  `market_regime.*`) — pauses *new* entries on a chain while its
+  configured reference token (Wrapped SOL for Solana by default) is down
+  more than `market_regime.max_drop_pct_1h` (default 7%) in the last
+  hour. Meme coins tend to sell off together with the chain they trade on
+  regardless of their own individual chart, and nothing else in this
+  bot's safety/scoring model looks beyond each candidate's own numbers.
+  Existing positions keep being managed normally — the same "halt new
+  entries only" pattern the daily-loss circuit breaker in §5 already
+  uses. Live-only (see §6): there's no historical reference-token series
+  aligned to a backtest's own timestamps without materially more plumbing
+  than this is worth. Deliberately conservative about which chains this
+  covers — a wrong or fabricated reference address would silently produce
+  a meaningless signal, so `config/default.yaml` only pre-fills Solana's
+  Wrapped SOL mint, the one address this project's own code already
+  relies on elsewhere. Add other chains yourself if you want the same
+  protection there, and verify any address you add independently first.
 
 ## 5. Risk management (`bot/strategy/risk_manager.py`)
 
@@ -224,12 +273,24 @@ that:
   vary bar to bar in a backtest — only the age- and activity-derived parts
   of the safety gate and score do.
 - **Not evaluated at all**: Solana mint/freeze authority renouncement,
-  holder concentration, sellability, and the liquidity-crash/stability
-  check, since none of these can be reconstructed from historical OHLCV
-  alone -- there's no historical on-chain RPC feed, no historical Jupiter
-  quote, and no historical tick-by-tick liquidity series to check them
-  against. All five are disabled in every backtest regardless of config;
-  they're validated live, not historically.
+  holder concentration, sellability, the liquidity-crash/stability check,
+  and the market-regime filter (§4), since none of these can be
+  reconstructed from historical OHLCV alone -- there's no historical
+  on-chain RPC feed, no historical Jupiter quote, no historical
+  tick-by-tick liquidity series, and no historical reference-token series
+  aligned to the backtest's own timestamps. All are disabled/skipped in
+  every backtest regardless of config; they're validated live, not
+  historically.
+- **Approximated, not skipped**: strategy confluence
+  (`risk.min_agreeing_strategies`) and multi-timeframe confirmation (§4)
+  *are* evaluated in a backtest, unlike the checks above. Confluence is
+  pure signal counting, no external data needed. Multi-timeframe
+  confirmation is approximated by resampling the same historical OHLCV
+  window this bot already has into coarser bars (see
+  `bot/analysis/higher_timeframe.py`'s `resample_ohlcv`) rather than
+  fetching a genuinely independent higher-timeframe series the way live
+  scanning does -- a reasonable stand-in, not an exact match for what a
+  real 1h candle from the exchange would have looked like at that moment.
 
 Read the rest of the caveats in `bot/backtest/engine.py`'s docstring
 before trusting a result: fills happen at the current bar's close (no

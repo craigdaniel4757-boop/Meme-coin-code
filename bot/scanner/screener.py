@@ -27,13 +27,16 @@ from contextlib import AsyncExitStack
 from datetime import datetime, timezone
 from typing import Callable
 
+from bot.analysis.higher_timeframe import higher_timeframe_confirms_uptrend
 from bot.analysis.indicators import compute_indicator_snapshot
 from bot.analysis.liquidity_guard import compute_liquidity_trend
+from bot.analysis.market_regime import MarketRegimeStatus, evaluate_market_regime
 from bot.analysis.safety_filters import evaluate_safety
 from bot.analysis.scoring import compute_score
 from bot.config import (
     AppConfig,
     build_indicator_params,
+    build_market_regime_config,
     build_risk_config,
     build_safety_config,
     build_scoring_weights,
@@ -102,6 +105,7 @@ class Scanner:
         self.scoring_weights = build_scoring_weights(cfg)
         self.safety_cfg = build_safety_config(cfg)
         self.risk_cfg = build_risk_config(cfg)
+        self.market_regime_cfg = build_market_regime_config(cfg)
 
         self._sem = asyncio.Semaphore(max(cfg.scanner.max_concurrent_requests, 1))
         self._stack: AsyncExitStack | None = None
@@ -323,6 +327,30 @@ class Scanner:
                         self.cfg.notifications,
                     )
 
+    async def _resolve_market_regime(self) -> dict[str, MarketRegimeStatus]:
+        """Once per cycle: for every chain with a configured reference
+        token, resolve its most-liquid pair and read off its 1h price
+        change. Cheap (one DexScreener call per configured chain -- just
+        Solana by default) and re-resolved fresh every cycle rather than
+        cached, since which pool is "most liquid" for a reference token can
+        shift and there's no meaningful staleness tradeoff worth managing
+        for one extra request every scan interval."""
+        statuses: dict[str, MarketRegimeStatus] = {}
+        if not self.market_regime_cfg.enabled:
+            return statuses
+        for chain_id, token_address in self.market_regime_cfg.reference_tokens.items():
+            pairs = await self.dex_client.get_pairs_by_token_addresses(chain_id, [token_address])
+            chain_pairs = [p for p in pairs if p.chainId == chain_id]
+            reference_pair = max(chain_pairs, key=lambda p: p.liquidity.usd or 0.0) if chain_pairs else None
+            status = evaluate_market_regime(chain_id, reference_pair)
+            statuses[chain_id] = status
+            if status.is_downtrend(self.market_regime_cfg.max_drop_pct_1h):
+                logger.warning(
+                    "Market regime check: %s reference token down %.1f%% in 1h -- pausing new %s entries",
+                    status.reference_symbol or chain_id, -(status.price_change_pct_1h or 0.0), chain_id,
+                )
+        return statuses
+
     async def enter_new_positions(self, candidates: list[Candidate]) -> None:
         if self.execution is None:
             return
@@ -335,6 +363,7 @@ class Scanner:
                 await notify(f"Circuit breaker active: {reason}", self.cfg.notifications)
             return
 
+        regime_by_chain = await self._resolve_market_regime()
         open_positions = self.execution.get_open_positions()
         open_pair_keys = {(p.chain_id, p.pair_address) for p in open_positions}
 
@@ -342,10 +371,13 @@ class Scanner:
             if not can_open_new_position(len(open_positions), self.risk_cfg):
                 break
             buy_signals = [s for s in candidate.signals if s.action == SignalAction.BUY]
-            if not buy_signals:
+            if len(buy_signals) < self.risk_cfg.min_agreeing_strategies:
                 continue
             key = (candidate.pair.chainId, candidate.pair.pairAddress)
             if key in open_pair_keys:
+                continue
+            regime = regime_by_chain.get(candidate.pair.chainId)
+            if regime is not None and regime.is_downtrend(self.market_regime_cfg.max_drop_pct_1h):
                 continue
 
             price = candidate.indicators.price or candidate.pair.price_usd
@@ -355,6 +387,13 @@ class Scanner:
             sizing = size_position(self.execution.get_bankroll_usd(), price, self.risk_cfg)
             if sizing.notional_usd <= 0:
                 continue
+
+            if self.risk_cfg.require_higher_timeframe_confirmation:
+                htf_df = await self.candle_provider.get_candles(
+                    candidate.pair.chainId, candidate.pair.pairAddress, self.risk_cfg.higher_timeframe_seconds
+                )
+                if higher_timeframe_confirms_uptrend(htf_df, self.indicator_params) is False:
+                    continue
 
             best_signal = max(buy_signals, key=lambda s: s.confidence)
             position = await self.execution.buy(

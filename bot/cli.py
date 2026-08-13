@@ -59,7 +59,13 @@ async def _run_scan_once(cfg: AppConfig, db: Database):
         return await scanner.scan_once()
 
 
-def _print_scan_table(candidates: list, limit: int = 25, min_score: float | None = None, show_top_notes: bool = True) -> None:
+def _print_scan_table(
+    candidates: list,
+    limit: int = 25,
+    min_score: float | None = None,
+    show_top_notes: bool = True,
+    min_agreeing_strategies: int = 1,
+) -> None:
     table = Table(title=f"memebot scan -- {len(candidates)} candidates analyzed")
     for col, justify, overflow in [
         ("Symbol", None, None), ("Chain", None, None), ("Score", "right", None), ("Safety", None, None),
@@ -71,13 +77,16 @@ def _print_scan_table(candidates: list, limit: int = 25, min_score: float | None
         table.add_column(col, justify=justify or "left", overflow=overflow or "ellipsis")
 
     shown = 0
+    any_buy = False
     links: list[tuple[str, str]] = []
     for c in candidates:
         if min_score is not None and (not c.score or c.score.total < min_score):
             continue
         score_txt = f"{c.score.total:.0f}" if c.score else "-"
         safety_txt = "[green]OK[/green]" if c.safety.passed else "[red]FAIL[/red]"
-        is_buy = any(s.action == SignalAction.BUY for s in c.signals)
+        buy_count = sum(1 for s in c.signals if s.action == SignalAction.BUY)
+        is_buy = buy_count >= min_agreeing_strategies
+        any_buy = any_buy or is_buy
         action_txt = "[bold green]BUY[/bold green]" if is_buy else "[dim]HOLD[/dim]"
         price_txt = f"${c.pair.price_usd:.8g}" if c.pair.price_usd else "-"
         liq_txt = f"${c.pair.liquidity.usd:,.0f}" if c.pair.liquidity.usd else "-"
@@ -94,6 +103,12 @@ def _print_scan_table(candidates: list, limit: int = 25, min_score: float | None
             break
 
     console.print(table)
+    if any_buy:
+        console.print(
+            "[dim]BUY reflects strategy agreement, safety, and score -- two more checks (higher-timeframe "
+            "trend, market regime) are only applied right before the bot actually places a trade, and can "
+            "still hold one back.[/dim]"
+        )
     # Printed as a plain list rather than a table column: a DexScreener URL
     # is ~60 characters, which would force multi-line wrapping inside a
     # bordered cell (interleaved with box-drawing characters) that's awkward
@@ -117,7 +132,10 @@ def cmd_scan(args: argparse.Namespace) -> None:
     finally:
         db.close()
 
-    _print_scan_table(candidates, limit=args.limit, min_score=args.min_score)
+    _print_scan_table(
+        candidates, limit=args.limit, min_score=args.min_score,
+        min_agreeing_strategies=cfg.risk.min_agreeing_strategies,
+    )
 
 
 def _build_execution(cfg: AppConfig, db: Database, live_confirmed: bool):
@@ -147,10 +165,10 @@ def _build_execution(cfg: AppConfig, db: Database, live_confirmed: bool):
     )
 
 
-def _print_cycle_table(candidates: list) -> None:
+def _print_cycle_table(candidates: list, min_agreeing_strategies: int) -> None:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     console.print(f"\n[dim]── scan cycle: {stamp} UTC ──[/dim]")
-    _print_scan_table(candidates, limit=15, show_top_notes=False)
+    _print_scan_table(candidates, limit=15, show_top_notes=False, min_agreeing_strategies=min_agreeing_strategies)
 
 
 async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool) -> None:
@@ -161,7 +179,9 @@ async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool) -> No
         f"Scan interval: {cfg.scanner.scan_interval_seconds}s. Ctrl+C to stop."
     )
     async with Scanner(cfg, db, execution) as scanner:
-        await scanner.run_forever(on_cycle_complete=_print_cycle_table)
+        await scanner.run_forever(
+            on_cycle_complete=lambda candidates: _print_cycle_table(candidates, cfg.risk.min_agreeing_strategies)
+        )
 
 
 def cmd_run(args: argparse.Namespace) -> None:

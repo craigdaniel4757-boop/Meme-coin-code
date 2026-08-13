@@ -123,8 +123,9 @@ indicators:
   swing_lookback: 20
 
 # ------------------------------------------------------------------------------
-# Strategy selection. Every listed strategy votes; a BUY needs at least one
-# strategy signal plus a passing composite score.
+# Strategy selection. Every listed strategy votes; a BUY needs at least
+# risk.min_agreeing_strategies of them to agree, plus a passing composite
+# score.
 # ------------------------------------------------------------------------------
 strategy:
   active: ["momentum_breakout", "volume_spike_breakout", "trend_pullback"]
@@ -161,6 +162,36 @@ risk:
   # but a severe one overrides every other exit rule, including the
   # stop-loss, since price can lag behind a liquidity pull.
   emergency_exit_liquidity_drawdown_pct: 60.0
+  # Require this many independently-agreeing strategies before entering --
+  # 1 (default) preserves "any one signal is enough." Raising it trades
+  # fewer, higher-conviction entries for a lower reliance on any single
+  # strategy's known false positives. See docs/STRATEGY.md section 4.
+  min_agreeing_strategies: 1
+  # Final check, only at the point of actually entering, that a higher
+  # timeframe's trend hasn't already turned against the entry signal.
+  # Fails open (never blocks) for a coin too young to have a meaningful
+  # higher-timeframe history yet -- see bot/analysis/higher_timeframe.py.
+  require_higher_timeframe_confirmation: true
+  higher_timeframe_seconds: 3600      # 1h anchor trend, independent of the scan's own candle interval
+
+# ------------------------------------------------------------------------------
+# Market-regime filter: pause *new* entries on a chain (existing positions
+# keep being managed normally) while that chain's reference token is in a
+# sharp short-term downtrend -- meme coins tend to sell off together with
+# the broader chain regardless of their own individual chart.
+#
+# Only Solana is pre-filled, using Wrapped SOL's mint address -- the one
+# address this project's own code already relies on elsewhere (see
+# quoteToken in bot/data/models.py). Add other chains yourself if you want
+# the same protection there, and verify any address you add independently
+# first -- a wrong or fabricated reference address would silently produce
+# a meaningless signal. See bot/analysis/market_regime.py.
+# ------------------------------------------------------------------------------
+market_regime:
+  enabled: true
+  max_drop_pct_1h: 7.0
+  reference_tokens:
+    solana: "So11111111111111111111111111111111111111112"   # Wrapped SOL
 
 # ------------------------------------------------------------------------------
 # Execution

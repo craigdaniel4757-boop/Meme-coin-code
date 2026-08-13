@@ -30,10 +30,11 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from bot.analysis.higher_timeframe import compute_higher_timeframe_trend_series
 from bot.analysis.indicators import IndicatorParams, compute_indicator_series, snapshot_from_series_row
 from bot.analysis.safety_filters import SafetyConfig, evaluate_safety
 from bot.analysis.scoring import ScoringWeights, compute_score
-from bot.data.models import DexPair, Liquidity, TokenRef, Trade, Txns, TxnWindow, WindowedFloats
+from bot.data.models import DexPair, Liquidity, SignalAction, TokenRef, Trade, Txns, TxnWindow, WindowedFloats
 from bot.strategy.base import StrategyContext
 from bot.strategy.risk_manager import RiskConfig, create_position, evaluate_exits, size_position
 from bot.strategy.signals import run_strategies
@@ -184,20 +185,26 @@ def run_backtest(
     assumed_fdv_usd: float | None = None,
     indicator_series: pd.DataFrame | None = None,
     pair_stats_series: pd.DataFrame | None = None,
+    higher_tf_series: list | None = None,
 ) -> BacktestResult:
     """`scoring_weights=None` (the default) skips the composite-score gate
     entirely, so every strategy signal is tradeable -- useful for asking
     "does this strategy have any edge at all." Pass `scoring_weights` (and
     optionally `min_score_to_trade`) to gate entries the same way live
     scanning does, which is what bot/backtest/optimizer.py does to measure
-    how a given set of weights actually performs.
+    how a given set of weights actually performs. `risk_cfg.min_agreeing_
+    strategies` and `risk_cfg.require_higher_timeframe_confirmation` (see
+    bot/strategy/risk_manager.py) are likewise only applied in that gated
+    mode -- raw mode exists specifically to see a strategy's unfiltered
+    edge, so it skips every filter, not just the score gate.
 
-    `indicator_series` / `pair_stats_series`, if provided, skip recomputing
-    those from `df` -- callers running many backtests against the same
-    candles (e.g. the optimizer trying hundreds of weight combinations)
-    should compute each once with `compute_indicator_series` /
-    `compute_pair_stats_series` and pass them in every time, since neither
-    depends on scoring weights at all.
+    `indicator_series` / `pair_stats_series` / `higher_tf_series`, if
+    provided, skip recomputing those from `df` -- callers running many
+    backtests against the same candles (e.g. the optimizer trying hundreds
+    of weight combinations) should compute each once with
+    `compute_indicator_series` / `compute_pair_stats_series` /
+    `compute_higher_timeframe_trend_series` and pass them in every time,
+    since none of them depend on scoring weights at all.
     """
     if df is None or len(df) < warmup_bars + 2:
         return BacktestResult([], [], starting_bankroll_usd, starting_bankroll_usd)
@@ -208,6 +215,10 @@ def run_backtest(
     stats_series = (
         pair_stats_series if pair_stats_series is not None else compute_pair_stats_series(df, interval_seconds)
     )
+    higher_tf_trend = higher_tf_series
+    if higher_tf_trend is None and risk_cfg.require_higher_timeframe_confirmation:
+        bars_per_group = max(1, risk_cfg.higher_timeframe_seconds // interval_seconds)
+        higher_tf_trend = compute_higher_timeframe_trend_series(df, bars_per_group, indicator_params)
     first_ts = int(df["timestamp"].iloc[0])
     effective_safety_cfg = safety_cfg or SafetyConfig(
         # Backtesting has no live RPC/Jupiter feed to check on-chain
@@ -284,7 +295,23 @@ def run_backtest(
             if tradeable:
                 ctx = StrategyContext(pair=pair, candles=window, indicators=indicators, params=strategy_params)
                 signals = run_strategies(ctx, active_strategies)
-                if signals:
+                buy_signals = [s for s in signals if s.action == SignalAction.BUY]
+
+                # Confluence and higher-timeframe confirmation are quality
+                # filters on top of the score gate, not independent gates --
+                # raw mode (scoring_weights=None) skips every filter, not
+                # just the score, to show a strategy's unfiltered edge.
+                if scoring_weights is not None and buy_signals:
+                    if len(buy_signals) < risk_cfg.min_agreeing_strategies:
+                        buy_signals = []
+                    elif (
+                        risk_cfg.require_higher_timeframe_confirmation
+                        and higher_tf_trend is not None
+                        and higher_tf_trend[i] is False
+                    ):
+                        buy_signals = []
+
+                if buy_signals:
                     sizing = size_position(cash, price, risk_cfg)
                     if sizing.notional_usd > 0:
                         fill_price = price * (1 + simulated_slippage_bps / 10_000)
@@ -293,7 +320,7 @@ def run_backtest(
                         cash -= sizing.notional_usd + fee
                         open_position = create_position(
                             chain_id, "backtest", "backtest", symbol, fill_price, quantity,
-                            signals[0].strategy_name, risk_cfg,
+                            buy_signals[0].strategy_name, risk_cfg,
                         )
                         trades.append(
                             Trade(
@@ -307,7 +334,7 @@ def run_backtest(
                                 quantity=quantity,
                                 fee_usd=fee,
                                 timestamp=ts,
-                                reason=signals[0].reason,
+                                reason=buy_signals[0].reason,
                             )
                         )
 

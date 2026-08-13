@@ -1,11 +1,16 @@
-"""Position sizing, stop-loss/take-profit/trailing-stop management, and the
-daily-loss circuit breaker. Applies identically whether execution is paper
-or live -- risk discipline shouldn't change just because the money is fake.
+"""Position sizing, stop-loss/take-profit/trailing-stop management, the
+daily-loss circuit breaker, and a couple of final "is this actually worth
+entering" gates (strategy agreement, higher-timeframe confirmation).
+Applies identically whether execution is paper or live -- risk discipline
+shouldn't change just because the money is fake.
 
 This module never talks to the network or a portfolio object directly; it's
 pure functions over explicit numbers (bankroll, prices, position state), so
 it's trivial to unit test and equally usable from the live scanner loop and
-the backtester.
+the backtester. The two entry-gate fields live here rather than in their
+own config object because both bot/scanner/screener.py and
+bot/backtest/engine.py already thread a `RiskConfig` through end to end --
+reusing that instead of adding a third parallel config path.
 """
 
 from __future__ import annotations
@@ -38,6 +43,18 @@ class RiskConfig:
     # position, but a severe one should override every other exit rule,
     # including the stop-loss, since price can lag a liquidity pull.
     emergency_exit_liquidity_drawdown_pct: float = 60.0
+    # Require at least this many independently-agreeing strategies (see
+    # bot/strategy/signals.py) before a candidate is entered -- the default
+    # of 1 preserves the original "any one signal is enough" behavior;
+    # raising it trades fewer, higher-conviction entries for a lower win
+    # rate on any single strategy's known false positives (see
+    # docs/STRATEGY.md section 4, e.g. volume_spike_breakout on its own).
+    min_agreeing_strategies: int = 1
+    # See bot/analysis/higher_timeframe.py -- a final check, only at the
+    # point of actually entering, that a higher timeframe's trend hasn't
+    # already turned against the base-timeframe signal.
+    require_higher_timeframe_confirmation: bool = True
+    higher_timeframe_seconds: int = 3600
 
 
 @dataclass(slots=True)

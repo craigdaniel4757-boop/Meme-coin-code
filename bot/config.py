@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 from bot.analysis.indicators import IndicatorParams
+from bot.analysis.market_regime import MarketRegimeConfig
 from bot.analysis.safety_filters import SafetyConfig
 from bot.analysis.scoring import ScoringWeights
 from bot.strategy.risk_manager import RiskConfig
@@ -147,6 +148,15 @@ class RiskYamlConfig(BaseModel):
     max_daily_loss_pct: float = 8.0
     max_slippage_bps: float = 150.0
     emergency_exit_liquidity_drawdown_pct: float = 60.0
+    min_agreeing_strategies: int = 1
+    require_higher_timeframe_confirmation: bool = True
+    higher_timeframe_seconds: int = 3600
+
+
+class MarketRegimeYamlConfig(BaseModel):
+    enabled: bool = True
+    max_drop_pct_1h: float = 7.0
+    reference_tokens: dict[str, str] = Field(default_factory=dict)
 
 
 class PaperExecConfig(BaseModel):
@@ -189,6 +199,7 @@ class AppConfig(BaseModel):
     indicators: IndicatorsYamlConfig = Field(default_factory=IndicatorsYamlConfig)
     strategy: StrategyYamlConfig = Field(default_factory=StrategyYamlConfig)
     risk: RiskYamlConfig = Field(default_factory=RiskYamlConfig)
+    market_regime: MarketRegimeYamlConfig = Field(default_factory=MarketRegimeYamlConfig)
     execution: ExecutionConfig = Field(default_factory=ExecutionConfig)
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     storage: StorageConfig = Field(default_factory=StorageConfig)
@@ -277,4 +288,16 @@ def build_risk_config(cfg: AppConfig) -> RiskConfig:
         max_daily_loss_pct=r.max_daily_loss_pct,
         max_slippage_bps=r.max_slippage_bps,
         emergency_exit_liquidity_drawdown_pct=r.emergency_exit_liquidity_drawdown_pct,
+        min_agreeing_strategies=r.min_agreeing_strategies,
+        require_higher_timeframe_confirmation=r.require_higher_timeframe_confirmation,
+        higher_timeframe_seconds=r.higher_timeframe_seconds,
+    )
+
+
+def build_market_regime_config(cfg: AppConfig) -> MarketRegimeConfig:
+    m = cfg.market_regime
+    return MarketRegimeConfig(
+        enabled=m.enabled,
+        max_drop_pct_1h=m.max_drop_pct_1h,
+        reference_tokens=dict(m.reference_tokens),
     )

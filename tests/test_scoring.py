@@ -140,3 +140,34 @@ def test_healthy_holder_concentration_scores_better_than_concentrated():
 
     assert healthy_score.liquidity_safety > concentrated_score.liquidity_safety
     assert any("concentration" in note for note in concentrated_score.notes)
+
+
+def test_normal_trade_sizes_no_wash_trading_note():
+    # $50k liquidity, $300k 24h volume, 500 24h txns -> ~$600 average
+    # trade, a small fraction of liquidity.
+    pair = make_pair(volume_24h_usd=300_000.0, buys_24h=300, sells_24h=200)
+    safety = _neutral_safety(pair)
+    score = compute_score(pair, _bullish_indicators(), safety, ScoringWeights())
+    assert not any("wash trading" in note for note in score.notes)
+
+
+def test_large_average_trade_size_flags_wash_trading():
+    # Same $50k liquidity and $300k volume, but only 50 24h transactions
+    # (still enough to clear the unrelated min-activity safety floor) --
+    # each averaging $6k, 12% of the entire pool's liquidity.
+    pair = make_pair(volume_24h_usd=300_000.0, buys_24h=30, sells_24h=20)
+    safety = _neutral_safety(pair)
+    score = compute_score(pair, _bullish_indicators(), safety, ScoringWeights())
+    assert any("wash trading" in note for note in score.notes)
+
+
+def test_large_average_trade_size_scores_worse_than_normal():
+    normal = make_pair(volume_24h_usd=300_000.0, buys_24h=300, sells_24h=200)
+    suspicious = make_pair(volume_24h_usd=300_000.0, buys_24h=30, sells_24h=20)
+    safety_normal = _neutral_safety(normal)
+    safety_suspicious = _neutral_safety(suspicious)
+
+    normal_score = compute_score(normal, _bullish_indicators(), safety_normal, ScoringWeights())
+    suspicious_score = compute_score(suspicious, _bullish_indicators(), safety_suspicious, ScoringWeights())
+
+    assert suspicious_score.volume < normal_score.volume

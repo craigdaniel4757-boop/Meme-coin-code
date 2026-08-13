@@ -45,23 +45,31 @@ activity — it does not, and cannot, guarantee profit.
    not just a number.
 6. **Generates signals** from three independent strategies (momentum
    breakout, volume-spike breakout, trend pullback) — see
-   `docs/STRATEGY.md` for the exact rules each one trades.
-7. **Sizes and manages risk** — fixed-fractional position sizing off your
+   `docs/STRATEGY.md` for the exact rules each one trades. By default any
+   one strategy's BUY signal is enough; raise `risk.min_agreeing_strategies`
+   to require several to agree before entering.
+7. **Confirms before entering** — two more checks run only at the point of
+   actually placing a trade (not for every candidate scanned): a
+   multi-timeframe trend check that a higher timeframe hasn't already
+   turned against the entry, and a market-regime filter that pauses new
+   entries while a chain's reference token (SOL by default) is in a sharp
+   short-term downtrend.
+8. **Sizes and manages risk** — fixed-fractional position sizing off your
    configured bankroll, per-token exposure caps, a hard stop-loss, a
    staged take-profit ladder, an ATR-aware trailing stop once a position
    is sufficiently in profit, a max-hold timer, a liquidity-crash
    emergency exit that overrides every other rule (including the
    stop-loss) if a held position's liquidity craters, and a daily-loss
    circuit breaker that halts new entries for the day.
-8. **Executes** — in paper mode (default) against a fully simulated
+9. **Executes** — in paper mode (default) against a fully simulated
    portfolio with configurable slippage/fees, or in live mode as real
    swaps signed and sent through Jupiter on Solana.
-9. **Backtests** — replay any strategy against recorded or fetched
-   history, gated by the same composite score used live, and get win rate,
-   profit factor, expectancy, max drawdown, and a Sharpe-style ratio back,
-   so claims about a strategy are something you can check yourself rather
-   than take on faith.
-10. **Auto-tunes scoring weights** — `optimize-weights` runs many
+10. **Backtests** — replay any strategy against recorded or fetched
+    history, gated by the same composite score used live, and get win rate,
+    profit factor, expectancy, max drawdown, and a Sharpe-style ratio back,
+    so claims about a strategy are something you can check yourself rather
+    than take on faith.
+11. **Auto-tunes scoring weights** — `optimize-weights` runs many
     backtests across several pools with different weight combinations and
     reports whichever performed best, with a minimum-trade-count floor and
     multi-pool requirement specifically to push back on overfitting. See
@@ -120,7 +128,8 @@ bot/data/        DexScreener + GeckoTerminal clients, Solana on-chain checks
                   typed models
 bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/VWAP/swings),
                   composite scoring model, hard safety filters,
-                  liquidity-crash detector
+                  liquidity-crash detector, multi-timeframe confirmation,
+                  market-regime filter
 bot/strategy/     Signal-generating strategies + the risk manager
                   (sizing, stop-loss, take-profit ladder, trailing stop,
                   circuit breaker)

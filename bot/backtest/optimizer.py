@@ -34,6 +34,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
+from bot.analysis.higher_timeframe import compute_higher_timeframe_trend_series
 from bot.analysis.indicators import IndicatorParams, compute_indicator_series
 from bot.analysis.safety_filters import SafetyConfig
 from bot.analysis.scoring import ScoringWeights
@@ -124,10 +125,13 @@ def _evaluate(
     pools: list[PoolSpec],
     indicator_series_by_pool: list[pd.DataFrame],
     pair_stats_series_by_pool: list[pd.DataFrame],
+    higher_tf_series_by_pool: list[list | None],
     cfg: OptimizerRunConfig,
 ) -> WeightCandidate:
     pool_results: list[PoolResult] = []
-    for pool, series, stats_series in zip(pools, indicator_series_by_pool, pair_stats_series_by_pool):
+    for pool, series, stats_series, htf_series in zip(
+        pools, indicator_series_by_pool, pair_stats_series_by_pool, higher_tf_series_by_pool
+    ):
         result = run_backtest(
             df=pool.candles,
             symbol=pool.symbol,
@@ -144,6 +148,7 @@ def _evaluate(
             safety_cfg=cfg.safety_cfg,
             indicator_series=series,
             pair_stats_series=stats_series,
+            higher_tf_series=htf_series,
         )
         metrics = compute_metrics(result)
         disqualified = metrics.closed_trades < cfg.min_trades_per_pool
@@ -204,9 +209,25 @@ def optimize_weights(
         compute_pair_stats_series(p.candles, interval)
         for p, interval in zip(pools, interval_seconds_by_pool)
     ]
+    # Doesn't depend on scoring weights any more than the other two
+    # precomputed series do, so it's likewise computed once per pool and
+    # reused across every trial rather than being recomputed inside
+    # run_backtest on every one of `trials` calls.
+    higher_tf_series_by_pool = [
+        (
+            compute_higher_timeframe_trend_series(
+                p.candles, max(1, cfg.risk_cfg.higher_timeframe_seconds // interval), cfg.indicator_params
+            )
+            if cfg.risk_cfg.require_higher_timeframe_confirmation
+            else None
+        )
+        for p, interval in zip(pools, interval_seconds_by_pool)
+    ]
 
     def evaluate(weights: ScoringWeights) -> WeightCandidate:
-        return _evaluate(weights, pools, indicator_series_by_pool, pair_stats_series_by_pool, cfg)
+        return _evaluate(
+            weights, pools, indicator_series_by_pool, pair_stats_series_by_pool, higher_tf_series_by_pool, cfg
+        )
 
     baseline = evaluate(baseline_weights or ScoringWeights())
     candidates = [evaluate(_sample_weights(rng)) for _ in range(trials)]
