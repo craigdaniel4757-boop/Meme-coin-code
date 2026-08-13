@@ -40,6 +40,7 @@ def momentum_breakout(ctx: StrategyContext) -> Signal | None:
     p = ctx.params.get("momentum_breakout", {})
     lookback = p.get("breakout_lookback", 20)
     min_z = p.get("min_volume_zscore", 1.5)
+    require_retest = p.get("require_retest", False)
 
     if ind.swing_high is None or ind.volume_zscore is None:
         return None
@@ -48,6 +49,13 @@ def momentum_breakout(ctx: StrategyContext) -> Signal | None:
     if ind.volume_zscore < min_z:
         return None
     if ind.macd_hist is not None and ind.macd_hist < 0:
+        return None
+    # Optional, stricter mode: instead of buying the initial break, require
+    # price to have pulled back near the level and reclaimed it -- see
+    # `breakout_retest_confirmed` in bot/analysis/indicators.py. Off by
+    # default (preserves "buy the initial break"); fewer signals when on,
+    # since a straight-line breakout that never looks back won't qualify.
+    if require_retest and not ind.breakout_retest_confirmed:
         return None
 
     breakout_strength_pct = (ind.price / ind.swing_high - 1) * 100

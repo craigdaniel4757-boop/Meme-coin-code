@@ -178,7 +178,18 @@ highest false-positive rate of the group on its own.
   just happened, follow it" entry. Weakness: by definition you're buying
   after the move has already started, so you're paying up for
   confirmation; on a coin that immediately reverses, this is the strategy
-  most likely to buy the local top.
+  most likely to buy the local top. Optional `require_retest` mode (off
+  by default, config: `strategy.momentum_breakout.require_retest`) trades
+  away some of that weakness for fewer signals: instead of buying the
+  initial break, it waits for price to pull back near the broken level
+  and reclaim it (`breakout_retest_confirmed` in
+  `bot/analysis/indicators.py`) before entering — a genuine retest-and-
+  hold is a stronger continuation signal than a break that's never been
+  tested, at the cost of missing breakouts that never look back at all.
+  Like the divergence detector in §2, this is a simplified, fully
+  vectorizable approximation of a textbook retest: it checks for *any*
+  pullback within a shorter recent sub-window after the breakout, not a
+  precise single swing low.
 - **`volume_spike_breakout`** — a more sensitive, volume-first trigger:
   fires on a sharp volume z-score spike plus a positive 5-minute price
   move, before a clean range breakout has necessarily formed. Catches
@@ -202,7 +213,7 @@ highest false-positive rate of the group on its own.
   lower volume-confirmation bar than those two, since volume sometimes
   follows price rather than leading it out of a squeeze.
 
-**Two more checks run only at the point of actually entering a trade** —
+**Three more checks run only at the point of actually entering a trade** —
 not for every candidate scanned, so API load stays bounded to real signals
 rather than the hundreds of candidates a cycle might discover:
 
@@ -237,6 +248,16 @@ rather than the hundreds of candidates a cycle might discover:
   Wrapped SOL mint, the one address this project's own code already
   relies on elsewhere. Add other chains yourself if you want the same
   protection there, and verify any address you add independently first.
+- **Same-token cooldown** (`bot/strategy/risk_manager.py`'s
+  `NEGATIVE_EXIT_KINDS`, config: `risk.require_same_token_cooldown`,
+  `risk.same_token_cooldown_minutes`) — blocks re-entering a token for
+  `same_token_cooldown_minutes` (default 30) after a stop-loss,
+  liquidity-crash, or reversal exit on that *same* token. Immediately
+  buying back into a setup that just stopped you out is usually chasing
+  the same bad trade a second time, not reacting to genuinely new
+  information. Take-profit, trailing-stop, and max-hold exits don't count
+  toward it — those mean the trade worked or was simply time-boxed, not
+  that the token itself did anything wrong.
 
 ## 5. Risk management (`bot/strategy/risk_manager.py`)
 
@@ -330,11 +351,23 @@ that:
   scanning does -- a reasonable stand-in, not an exact match for what a
   real 1h candle from the exchange would have looked like at that moment.
 - **Identical, not approximated**: RSI/price divergence, the bearish
-  engulfing pattern, the Bollinger squeeze breakout strategy, and the
-  reversal-pattern exit (§2, §4, §5) are all pure functions of the OHLCV
-  window itself, computed by the exact same indicator code live scanning
-  uses -- nothing about them changes or needs approximating in a
-  backtest.
+  engulfing pattern, the Bollinger squeeze breakout strategy, breakout
+  retest confirmation, and the reversal-pattern exit (§2, §4, §5) are all
+  pure functions of the OHLCV window itself, computed by the exact same
+  indicator code live scanning uses -- nothing about them changes or
+  needs approximating in a backtest.
+- **Also identical, different mechanism**: the same-token cooldown (§4)
+  needs no external data either, so a backtest applies it exactly the way
+  live scanning does -- track the timestamp of the last stop-loss/
+  liquidity-crash/reversal exit and block re-entry within
+  `same_token_cooldown_minutes` of it. Only the bookkeeping differs: live
+  scanning queries persisted trade history (`Database.
+  has_recent_negative_exit`) so the cooldown survives a restart, while a
+  backtest just tracks the last negative-exit timestamp in memory as it
+  replays. Since a backtest always starts from a clean slate on one pool
+  with at most one open position at a time, there's no predating trade
+  history a DB query could see that the in-memory version would miss --
+  the two are equivalent for everything a backtest can actually simulate.
 - **Not applicable, not skipped**: multi-pool consolidation (§4) is a
   *discovery*-time concept -- there's no discovery phase in a backtest at
   all, since it already replays one specific, pre-selected pool. This

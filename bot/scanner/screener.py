@@ -53,6 +53,7 @@ from bot.notify.alerts import notify
 from bot.storage.db import Database
 from bot.strategy.base import StrategyContext
 from bot.strategy.risk_manager import (
+    NEGATIVE_EXIT_KINDS,
     can_open_new_position,
     check_circuit_breaker,
     evaluate_exits,
@@ -356,7 +357,7 @@ class Scanner:
             for action in evaluate_exits(
                 position, price, self.risk_cfg, liquidity_trend=liquidity_trend, bearish_reversal=bearish_reversal
             ):
-                trade = await self.execution.sell(position, action.fraction, price, action.reason)
+                trade = await self.execution.sell(position, action.fraction, price, action.reason, action.kind)
                 if trade is not None and self.cfg.notifications.notify_on_trade:
                     await notify(
                         f"SELL {position.symbol}: {action.reason} | qty {trade.quantity:.4g} @ "
@@ -416,6 +417,12 @@ class Scanner:
             regime = regime_by_chain.get(candidate.pair.chainId)
             if regime is not None and regime.is_downtrend(self.market_regime_cfg.max_drop_pct_1h):
                 continue
+            if self.risk_cfg.require_same_token_cooldown:
+                cooldown_cutoff = time.time() - self.risk_cfg.same_token_cooldown_minutes * 60
+                if self.db.has_recent_negative_exit(
+                    candidate.pair.chainId, candidate.pair.pairAddress, list(NEGATIVE_EXIT_KINDS), cooldown_cutoff
+                ):
+                    continue
 
             price = candidate.indicators.price or candidate.pair.price_usd
             if not price:

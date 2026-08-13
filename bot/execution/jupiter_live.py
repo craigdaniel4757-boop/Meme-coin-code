@@ -264,7 +264,9 @@ class JupiterLiveExecutionProvider(ExecutionProvider):
         )
         return position
 
-    async def sell(self, position: Position, fraction: float, quote_price: float, reason: str) -> Trade | None:
+    async def sell(
+        self, position: Position, fraction: float, quote_price: float, reason: str, kind: str = ""
+    ) -> Trade | None:
         fraction = min(fraction, position.remaining_fraction)
         if fraction <= 0:
             return None
@@ -291,7 +293,9 @@ class JupiterLiveExecutionProvider(ExecutionProvider):
         usdc_out = int(quote.get("outAmount", 0)) / (10**USDC_DECIMALS)
         fill_price = usdc_out / qty_to_sell if qty_to_sell else 0.0
 
-        trade = self.portfolio.apply_sell(position, fraction, fill_price, fee_usd=0.0, reason=f"{reason} tx={signature}")
+        trade = self.portfolio.apply_sell(
+            position, fraction, fill_price, fee_usd=0.0, reason=f"{reason} tx={signature}", kind=kind
+        )
         self.db.upsert_position(position_to_row(position))
         self.db.insert_trade(trade_to_row(trade, mode="live"))
         logger.warning(

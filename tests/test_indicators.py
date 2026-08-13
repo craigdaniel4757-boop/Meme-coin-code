@@ -139,6 +139,7 @@ def test_vectorized_series_matches_recompute_on_truncated_window():
         assert fast.bearish_divergence == slow.bearish_divergence
         assert fast.bullish_divergence == slow.bullish_divergence
         assert fast.bearish_engulfing == slow.bearish_engulfing
+        assert fast.breakout_retest_confirmed == slow.breakout_retest_confirmed
 
 
 # -- rolling_bandwidth_min -------------------------------------------------------
@@ -230,3 +231,52 @@ def test_rsi_divergence_no_signal_when_price_and_rsi_agree():
 
     assert bool(bearish.iloc[10]) is False
     assert bool(bullish.iloc[10]) is False
+
+
+# -- breakout_retest_confirmed --------------------------------------------------
+
+
+def test_breakout_retest_confirmed_true_after_pullback_and_reclaim():
+    swing_high = pd.Series([1.0] * 10)
+    close = pd.Series([0.9, 0.9, 0.9, 0.9, 0.9, 1.05, 0.98, 1.01, 0.99, 1.02])
+    low = pd.Series([0.85, 0.85, 0.85, 0.85, 0.85, 0.95, 0.97, 0.98, 0.97, 1.00])
+
+    result = ind.breakout_retest_confirmed(close, low, swing_high, retest_lookback=5, retest_tolerance_pct=3.0)
+
+    assert bool(result.iloc[9]) is True
+
+
+def test_breakout_retest_confirmed_false_when_price_never_pulls_back():
+    """A clean, continuous breakout that powers straight away from the
+    level (never comes back near it) shouldn't count as a retest -- the
+    whole point is requiring a genuine pullback-and-reclaim, not just any
+    price-above-the-level bar within the lookback window."""
+    swing_high = pd.Series([1.0] * 10)
+    close = pd.Series([0.9, 0.9, 0.9, 0.9, 0.9, 1.05, 1.15, 1.25, 1.35, 1.45])
+    low = pd.Series([0.85, 0.85, 0.85, 0.85, 0.85, 1.00, 1.10, 1.20, 1.30, 1.40])
+
+    result = ind.breakout_retest_confirmed(close, low, swing_high, retest_lookback=5, retest_tolerance_pct=3.0)
+
+    assert bool(result.iloc[9]) is False
+
+
+def test_breakout_retest_confirmed_false_without_any_breakout():
+    swing_high = pd.Series([1.0] * 10)
+    close = pd.Series([0.95] * 10)
+    low = pd.Series([0.90] * 10)
+
+    result = ind.breakout_retest_confirmed(close, low, swing_high, retest_lookback=5, retest_tolerance_pct=3.0)
+
+    assert bool(result.iloc[9]) is False
+
+
+def test_breakout_retest_confirmed_false_when_not_yet_reclaimed():
+    """Broke out, pulled back near the level -- but the current bar is
+    still below it, so the level hasn't actually been reclaimed yet."""
+    swing_high = pd.Series([1.0] * 10)
+    close = pd.Series([0.9, 0.9, 0.9, 0.9, 0.9, 1.05, 0.98, 0.97, 0.96, 0.95])
+    low = pd.Series([0.85, 0.85, 0.85, 0.85, 0.85, 0.95, 0.96, 0.95, 0.94, 0.93])
+
+    result = ind.breakout_retest_confirmed(close, low, swing_high, retest_lookback=5, retest_tolerance_pct=3.0)
+
+    assert bool(result.iloc[9]) is False

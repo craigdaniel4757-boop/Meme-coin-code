@@ -69,7 +69,9 @@ class PaperExecutionProvider(ExecutionProvider):
         )
         return position
 
-    async def sell(self, position: Position, fraction: float, quote_price: float, reason: str) -> Trade | None:
+    async def sell(
+        self, position: Position, fraction: float, quote_price: float, reason: str, kind: str = ""
+    ) -> Trade | None:
         if position.id not in self.portfolio.positions or quote_price <= 0:
             return None
 
@@ -77,7 +79,7 @@ class PaperExecutionProvider(ExecutionProvider):
         qty = position.quantity * min(fraction, position.remaining_fraction)
         fee_usd = qty * fill_price * self.simulated_fee_bps / 10_000
 
-        trade = self.portfolio.apply_sell(position, fraction, fill_price, fee_usd, reason)
+        trade = self.portfolio.apply_sell(position, fraction, fill_price, fee_usd, reason, kind=kind)
         self.db.upsert_position(position_to_row(position))
         self.db.insert_trade(trade_to_row(trade, mode="paper"))
         logger.info(

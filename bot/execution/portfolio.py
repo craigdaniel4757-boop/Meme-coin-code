@@ -49,12 +49,13 @@ class Portfolio:
             fee_usd=fee_usd,
             timestamp=time.time(),
             reason=f"entry ({position.strategy_name})",
+            kind="entry",
         )
         self.trade_log.append(trade)
         return trade
 
     def apply_sell(
-        self, position: Position, fraction: float, price: float, fee_usd: float, reason: str
+        self, position: Position, fraction: float, price: float, fee_usd: float, reason: str, kind: str = ""
     ) -> Trade:
         fraction = max(0.0, min(fraction, position.remaining_fraction))
         qty = position.quantity * fraction
@@ -78,6 +79,7 @@ class Portfolio:
             timestamp=time.time(),
             reason=reason,
             realized_pnl_usd=realized,
+            kind=kind,
         )
         self.trade_log.append(trade)
 
@@ -133,6 +135,7 @@ def trade_to_row(trade: Trade, mode: str) -> dict:
         "reason": trade.reason,
         "realized_pnl_usd": trade.realized_pnl_usd,
         "mode": mode,
+        "kind": trade.kind,
     }
 
 

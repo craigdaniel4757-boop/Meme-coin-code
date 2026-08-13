@@ -52,12 +52,13 @@ activity — it does not, and cannot, guarantee profit.
    trades. By default any one strategy's BUY signal is enough; raise
    `risk.min_agreeing_strategies` to require several to agree before
    entering.
-7. **Confirms before entering** — two more checks run only at the point of
-   actually placing a trade (not for every candidate scanned): a
+7. **Confirms before entering** — three more checks run only at the point
+   of actually placing a trade (not for every candidate scanned): a
    multi-timeframe trend check that a higher timeframe hasn't already
-   turned against the entry, and a market-regime filter that pauses new
+   turned against the entry, a market-regime filter that pauses new
    entries while a chain's reference token (SOL by default) is in a sharp
-   short-term downtrend.
+   short-term downtrend, and a same-token cooldown that blocks re-entering
+   a token for a while after it just stopped you out.
 8. **Sizes and manages risk** — fixed-fractional position sizing off your
    configured bankroll, per-token exposure caps, a hard stop-loss, a
    staged take-profit ladder, an ATR-aware trailing stop once a position
@@ -133,12 +134,14 @@ bot/data/        DexScreener + GeckoTerminal clients, Solana on-chain checks
                   sellability probe, local candle store, rate limiting,
                   typed models
 bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/VWAP/swings,
-                  RSI divergence, bearish engulfing), composite scoring
-                  model, hard safety filters, liquidity-crash detector,
-                  multi-timeframe confirmation, market-regime filter
+                  RSI divergence, bearish engulfing, breakout retest
+                  confirmation), composite scoring model, hard safety
+                  filters, liquidity-crash detector, multi-timeframe
+                  confirmation, market-regime filter
 bot/strategy/     Signal-generating strategies + the risk manager
                   (sizing, stop-loss, take-profit ladder, trailing stop,
-                  reversal-pattern exit, circuit breaker)
+                  reversal-pattern exit, same-token cooldown, circuit
+                  breaker)
 bot/execution/    Portfolio bookkeeping, paper execution (default),
                   live Jupiter execution (opt-in)
 bot/scanner/      The continuous scan -> filter -> score -> signal ->

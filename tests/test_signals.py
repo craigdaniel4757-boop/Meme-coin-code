@@ -61,6 +61,36 @@ def test_momentum_breakout_rejects_negative_macd_histogram():
     assert momentum_breakout(_ctx(ind)) is None
 
 
+def test_momentum_breakout_require_retest_off_ignores_confirmation_flag():
+    # require_retest defaults to False -- a breakout snapshot without a
+    # confirmed retest must still fire normally.
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02,
+        breakout_retest_confirmed=False, num_candles=150,
+    )
+    assert momentum_breakout(_ctx(ind)) is not None
+
+
+def test_momentum_breakout_require_retest_blocks_unconfirmed_breakout():
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02,
+        breakout_retest_confirmed=False, num_candles=150,
+    )
+    params = {"momentum_breakout": {"require_retest": True}}
+    assert momentum_breakout(_ctx(ind, params=params)) is None
+
+
+def test_momentum_breakout_require_retest_fires_on_confirmed_retest():
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02,
+        breakout_retest_confirmed=True, num_candles=150,
+    )
+    params = {"momentum_breakout": {"require_retest": True}}
+    signal = momentum_breakout(_ctx(ind, params=params))
+    assert signal is not None
+    assert signal.strategy_name == "momentum_breakout"
+
+
 def test_momentum_breakout_end_to_end_on_synthetic_breakout():
     df = make_breakout_df().iloc[:104].reset_index(drop=True)  # base range + first few breakout bars
     from bot.analysis.indicators import IndicatorParams, compute_indicator_snapshot

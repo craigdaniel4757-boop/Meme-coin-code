@@ -31,10 +31,15 @@ class ExecutionProvider(ABC):
         price/quantity, or None if the order could not be filled."""
 
     @abstractmethod
-    async def sell(self, position: Position, fraction: float, quote_price: float, reason: str) -> Trade | None:
+    async def sell(
+        self, position: Position, fraction: float, quote_price: float, reason: str, kind: str = ""
+    ) -> Trade | None:
         """Sell `fraction` of a position's original quantity at
         (approximately) quote_price. Returns the resulting Trade, or None
-        if the order could not be filled."""
+        if the order could not be filled. `kind` is the structured
+        counterpart to `reason` (see `ExitAction.kind` in
+        bot/strategy/risk_manager.py), recorded on the Trade for the
+        same-token cooldown to query later."""
 
     @abstractmethod
     def get_bankroll_usd(self) -> float:

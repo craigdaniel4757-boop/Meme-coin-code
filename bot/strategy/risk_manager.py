@@ -22,6 +22,14 @@ from dataclasses import dataclass, field
 from bot.analysis.liquidity_guard import LiquidityTrend
 from bot.data.models import Position, TakeProfitLevel
 
+# ExitAction.kind values that represent the trade turning out badly --
+# distinct from take_profit/trailing_stop (worked out) and max_hold
+# (neutral). Used by the same-token cooldown (bot/scanner/screener.py and
+# bot/backtest/engine.py): re-entering a token immediately after one of
+# these is often just continuing chop or a downtrend, not a genuinely new
+# setup, so both are gated on the *same* set of "this went badly" kinds.
+NEGATIVE_EXIT_KINDS = frozenset({"stop_loss", "liquidity_crash", "reversal"})
+
 
 @dataclass(slots=True)
 class RiskConfig:
@@ -62,6 +70,11 @@ class RiskConfig:
     # giving it all back before the trailing stop even arms.
     require_reversal_exit: bool = True
     reversal_exit_min_gain_pct: float = 15.0
+    # Don't re-enter a token for this long after a negative-outcome exit
+    # (NEGATIVE_EXIT_KINDS above) on that same token -- avoids immediately
+    # re-buying into what's often still the same bad setup, not a fresh one.
+    require_same_token_cooldown: bool = True
+    same_token_cooldown_minutes: float = 30.0
 
 
 @dataclass(slots=True)

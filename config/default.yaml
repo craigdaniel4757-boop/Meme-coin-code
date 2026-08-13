@@ -121,6 +121,8 @@ indicators:
   atr_period: 14
   volume_zscore_period: 20
   swing_lookback: 20
+  retest_lookback: 10         # how far back momentum_breakout's optional require_retest mode looks
+  retest_tolerance_pct: 3.0   # how close a pullback needs to come to the broken level to count as a retest
 
 # ------------------------------------------------------------------------------
 # Strategy selection. Every listed strategy votes; a BUY needs at least
@@ -132,6 +134,10 @@ strategy:
   momentum_breakout:
     breakout_lookback: 20
     min_volume_zscore: 1.5
+    # Off by default (buy the initial break). When true, requires price to
+    # have pulled back near the broken level and reclaimed it before
+    # entering -- fewer, more validated signals. See docs/STRATEGY.md.
+    require_retest: false
   volume_spike_breakout:
     min_volume_zscore: 2.5
     max_rsi: 85
@@ -177,6 +183,11 @@ risk:
   # entry, before the position has proven itself.
   require_reversal_exit: true
   reversal_exit_min_gain_pct: 15.0
+  # Don't re-enter a token for this long after a stop-loss/liquidity-crash/
+  # reversal exit on that same token -- avoids immediately re-buying into
+  # what's often still the same bad setup, not a fresh one.
+  require_same_token_cooldown: true
+  same_token_cooldown_minutes: 30.0
   # Final check, only at the point of actually entering, that a higher
   # timeframe's trend hasn't already turned against the entry signal.
   # Fails open (never blocks) for a coin too young to have a meaningful

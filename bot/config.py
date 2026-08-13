@@ -117,6 +117,8 @@ class IndicatorsYamlConfig(BaseModel):
     atr_period: int = 14
     volume_zscore_period: int = 20
     swing_lookback: int = 20
+    retest_lookback: int = 10
+    retest_tolerance_pct: float = 3.0
 
 
 class StrategyYamlConfig(BaseModel):
@@ -159,6 +161,8 @@ class RiskYamlConfig(BaseModel):
     higher_timeframe_seconds: int = 3600
     require_reversal_exit: bool = True
     reversal_exit_min_gain_pct: float = 15.0
+    require_same_token_cooldown: bool = True
+    same_token_cooldown_minutes: float = 30.0
 
 
 class MarketRegimeYamlConfig(BaseModel):
@@ -244,6 +248,8 @@ def build_indicator_params(cfg: AppConfig) -> IndicatorParams:
         atr_period=ic.atr_period,
         volume_zscore_period=ic.volume_zscore_period,
         swing_lookback=ic.swing_lookback,
+        retest_lookback=ic.retest_lookback,
+        retest_tolerance_pct=ic.retest_tolerance_pct,
     )
 
 
@@ -301,6 +307,8 @@ def build_risk_config(cfg: AppConfig) -> RiskConfig:
         higher_timeframe_seconds=r.higher_timeframe_seconds,
         require_reversal_exit=r.require_reversal_exit,
         reversal_exit_min_gain_pct=r.reversal_exit_min_gain_pct,
+        require_same_token_cooldown=r.require_same_token_cooldown,
+        same_token_cooldown_minutes=r.same_token_cooldown_minutes,
     )
 
 

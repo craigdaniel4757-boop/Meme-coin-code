@@ -92,6 +92,33 @@ async def test_open_positions_survive_provider_restart(db):
     assert restored[0].base_token_address == "MINT"
 
 
+async def test_buy_records_entry_kind_on_trade(db):
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
+    await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())
+
+    assert provider.portfolio.trade_log[-1].kind == "entry"
+
+
+async def test_sell_threads_kind_through_to_trade_and_db(db):
+    # The same-token cooldown (Database.has_recent_negative_exit) reads this
+    # back from the DB, not just the in-memory Trade -- so this checks
+    # persistence, not only the return value.
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
+    position = await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())
+
+    trade = await provider.sell(position, fraction=1.0, quote_price=0.5, reason="stop-loss hit", kind="stop_loss")
+    assert trade.kind == "stop_loss"
+    assert db.has_recent_negative_exit("solana", "PAIR", ["stop_loss"], since_ts=trade.timestamp - 60)
+
+
+async def test_sell_without_kind_defaults_to_empty_string(db):
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
+    position = await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())
+
+    trade = await provider.sell(position, fraction=1.0, quote_price=1.2, reason="take-profit")
+    assert trade.kind == ""
+
+
 async def test_daily_realized_pnl_sums_only_sells_in_window(db):
     provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
     position = await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())

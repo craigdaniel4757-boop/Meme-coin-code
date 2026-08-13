@@ -201,6 +201,7 @@ class IndicatorSnapshot:
     bearish_divergence: bool = False
     bullish_divergence: bool = False
     bearish_engulfing: bool = False
+    breakout_retest_confirmed: bool = False
     num_candles: int = 0
 
 
@@ -298,3 +299,9 @@ class Trade:
     timestamp: float
     reason: str
     realized_pnl_usd: Optional[float] = None
+    # Structured counterpart to `reason` (which is free-text/human-readable)
+    # -- "entry" for buys, else one of ExitAction.kind's values (see
+    # bot/strategy/risk_manager.py). Lets callers like the same-token
+    # cooldown (bot/scanner/screener.py) match on a stable value instead of
+    # parsing prose.
+    kind: str = ""

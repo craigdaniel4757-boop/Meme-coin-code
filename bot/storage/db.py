@@ -73,9 +73,11 @@ CREATE TABLE IF NOT EXISTS trades (
     ts REAL NOT NULL,
     reason TEXT,
     realized_pnl_usd REAL,
-    mode TEXT NOT NULL DEFAULT 'paper'
+    mode TEXT NOT NULL DEFAULT 'paper',
+    kind TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades (ts);
+CREATE INDEX IF NOT EXISTS idx_trades_pair_lookup ON trades (chain_id, pair_address, ts);
 """
 
 
@@ -210,12 +212,31 @@ class Database:
             self._conn.execute(
                 """INSERT INTO trades
                    (id, position_id, chain_id, pair_address, symbol, side, price, quantity,
-                    fee_usd, ts, reason, realized_pnl_usd, mode)
+                    fee_usd, ts, reason, realized_pnl_usd, mode, kind)
                    VALUES (:id, :position_id, :chain_id, :pair_address, :symbol, :side, :price,
-                           :quantity, :fee_usd, :ts, :reason, :realized_pnl_usd, :mode)""",
+                           :quantity, :fee_usd, :ts, :reason, :realized_pnl_usd, :mode, :kind)""",
                 row,
             )
             self._conn.commit()
+
+    def has_recent_negative_exit(
+        self, chain_id: str, pair_address: str, kinds: list[str], since_ts: float
+    ) -> bool:
+        """Used by the same-token cooldown (bot/scanner/screener.py): was
+        there a sell of this exact pair, with one of `kinds` (e.g.
+        stop_loss/liquidity_crash/reversal), at or after `since_ts`?"""
+        if not kinds:
+            return False
+        with self._lock:
+            placeholders = ",".join("?" * len(kinds))
+            cur = self._conn.execute(
+                f"""SELECT 1 FROM trades
+                    WHERE chain_id = ? AND pair_address = ? AND side = 'sell'
+                      AND kind IN ({placeholders}) AND ts >= ?
+                    LIMIT 1""",
+                (chain_id, pair_address, *kinds, since_ts),
+            )
+            return cur.fetchone() is not None
 
     def get_trades(self, limit: int = 200) -> list[sqlite3.Row]:
         with self._lock:

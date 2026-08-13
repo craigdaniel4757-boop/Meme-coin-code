@@ -40,6 +40,8 @@ class IndicatorParams:
     volume_zscore_period: int = 20
     swing_lookback: int = 20
     vwap_period: int = 20
+    retest_lookback: int = 10
+    retest_tolerance_pct: float = 3.0
 
 
 def ema(series: pd.Series, period: int) -> pd.Series:
@@ -173,6 +175,52 @@ def bearish_engulfing(df: pd.DataFrame) -> pd.Series:
     return (prev_bullish & current_bearish & engulfs).fillna(False)
 
 
+def breakout_retest_confirmed(
+    close: pd.Series, low: pd.Series, swing_high: pd.Series,
+    retest_lookback: int = 10, retest_tolerance_pct: float = 3.0,
+) -> pd.Series:
+    """True at bar i if, within the trailing `retest_lookback` bars: (a) a
+    breakout above `swing_high` happened at some point, (b) price pulled
+    back to within `retest_tolerance_pct` of that level at some point, and
+    (c) the current bar has reclaimed the level. Used as an optional,
+    stricter alternative to buying the initial break (see
+    `bot/strategy/signals.py`'s `momentum_breakout`) -- a lot of
+    technical trading practice waits for a level to be retested and hold
+    before entering, since the initial break is where most false
+    breakouts get chopped out and immediately reverse. The tradeoff is
+    fewer signals: this only fires if a genuine pullback-and-reclaim
+    happens, not on a straight-line breakout that never looks back.
+
+    A simplified approximation, in the same spirit as `rsi_divergence`:
+    rather than precisely tracking "the specific breakout bar, then the
+    specific pullback low after it, then the reclaim," this checks that
+    all three conditions are individually satisfiable within the trailing
+    window, and measures the pullback against the *current* `swing_high`
+    reading rather than its value back at the actual breakout bar. That
+    reading tends to be stable across a genuine consolidation-after-
+    breakout (price isn't making fresh highs, so the trailing high barely
+    moves), which is exactly the scenario this is meant to catch.
+
+    The pullback is deliberately checked over a *shorter*, more recent
+    sub-window (half of `retest_lookback`, excluding the current bar) than
+    the breakout itself: a breakout bar's own low commonly sits right at
+    the level it just broke (that's what breaking out from below means),
+    so checking the full window for "a low near the level" would trivially
+    match the breakout bar itself even when nothing pulled back afterward.
+    Restricting the pullback check to the more recent half forces an
+    actual subsequent pullback for anything but a very fresh breakout.
+    """
+    pullback_window = max(2, retest_lookback // 2)
+    had_recent_breakout = (
+        (close > swing_high).shift(1).rolling(retest_lookback).max().fillna(0) > 0
+    )
+    pulled_back_near_level = (
+        low.shift(1).rolling(pullback_window).min() <= swing_high * (1 + retest_tolerance_pct / 100)
+    )
+    reclaimed_now = close > swing_high
+    return (had_recent_breakout & pulled_back_near_level & reclaimed_now).fillna(False)
+
+
 def rolling_vwap(df: pd.DataFrame, period: int = 20) -> pd.Series:
     """Rolling (not session-based -- meme coins trade 24/7 with no natural
     session open) volume-weighted average price over `period` bars: a
@@ -238,6 +286,9 @@ def compute_indicator_series(df: pd.DataFrame, params: IndicatorParams) -> pd.Da
     out["bearish_divergence"] = bearish_div
     out["bullish_divergence"] = bullish_div
     out["bearish_engulfing"] = bearish_engulfing(df)
+    out["breakout_retest_confirmed"] = breakout_retest_confirmed(
+        close, low, out["swing_high"], params.retest_lookback, params.retest_tolerance_pct
+    )
 
     out["num_candles"] = np.arange(1, len(df) + 1)
     return out
@@ -279,6 +330,7 @@ def snapshot_from_series_row(series_df: pd.DataFrame, i: int) -> IndicatorSnapsh
         bearish_divergence=bool_val("bearish_divergence"),
         bullish_divergence=bool_val("bullish_divergence"),
         bearish_engulfing=bool_val("bearish_engulfing"),
+        breakout_retest_confirmed=bool_val("breakout_retest_confirmed"),
         num_candles=int(row["num_candles"]),
     )
 

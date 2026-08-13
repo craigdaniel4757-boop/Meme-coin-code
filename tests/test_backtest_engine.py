@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import time
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -20,7 +21,7 @@ from bot.backtest.engine import (
     run_backtest,
 )
 from bot.strategy.risk_manager import RiskConfig
-from tests.conftest import make_breakout_df
+from tests.conftest import make_breakout_df, make_ohlcv
 
 
 def _risk_cfg() -> RiskConfig:
@@ -245,6 +246,79 @@ def test_higher_timeframe_confirmation_disabled_ignores_series():
         higher_tf_series=[False] * len(df),
     )
     assert len(result.trades) > 0
+
+
+# -- run_backtest: same-token cooldown ---------------------------------------
+
+
+def _make_stopout_then_rebreakout_df() -> pd.DataFrame:
+    """A breakout that gets stopped out, followed by consolidation and a
+    second, larger breakout -- built specifically to exercise the
+    same-token cooldown. make_breakout_df's single sustained move won't do
+    here: its drift so dominates its volatility that price never dips far
+    enough after entry to trigger a stop-loss at all."""
+    base = make_ohlcv(n=70, start_price=1.0, drift=0.0, volatility=0.003, seed=10)
+    breakout1 = make_ohlcv(
+        n=6, start_price=float(base["close"].iloc[-1]), drift=0.05, volatility=0.005, seed=11, volume=1000.0
+    )
+    breakout1["volume"] = breakout1["volume"] * 8
+    crash = make_ohlcv(
+        n=3, start_price=float(breakout1["close"].iloc[-1]), drift=-0.15, volatility=0.01, seed=12, volume=500.0
+    )
+    consolidation = make_ohlcv(
+        n=15, start_price=float(crash["close"].iloc[-1]), drift=0.0, volatility=0.003, seed=13, volume=500.0
+    )
+    breakout2 = make_ohlcv(
+        n=10, start_price=float(consolidation["close"].iloc[-1]), drift=0.06, volatility=0.005, seed=14,
+        volume=1000.0,
+    )
+    breakout2["volume"] = breakout2["volume"] * 8
+
+    ts = 1_700_000_000
+    parts = []
+    for part in (base, breakout1, crash, consolidation, breakout2):
+        part = part.copy()
+        part["timestamp"] = ts + np.arange(len(part)) * 60
+        ts = int(part["timestamp"].iloc[-1]) + 60
+        parts.append(part)
+    return pd.concat(parts, ignore_index=True)
+
+
+def test_same_token_cooldown_blocks_reentry_within_window():
+    df = _make_stopout_then_rebreakout_df()
+    cfg = RiskConfig(stop_loss_pct=8.0, require_same_token_cooldown=True, same_token_cooldown_minutes=999_999.0)
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], cfg,
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+    )
+    buys = [t for t in result.trades if t.side == "buy"]
+    sells = [t for t in result.trades if t.side == "sell"]
+    assert sells and sells[0].kind == "stop_loss"  # sanity: the scenario does stop out
+    assert len(buys) == 1  # cooldown blocks the second breakout's re-entry signal
+
+
+def test_same_token_cooldown_allows_reentry_after_window_elapses():
+    df = _make_stopout_then_rebreakout_df()
+    # The second breakout's signal arrives ~20 simulated minutes after the
+    # stop-loss -- comfortably past a 2-minute cooldown.
+    cfg = RiskConfig(stop_loss_pct=8.0, require_same_token_cooldown=True, same_token_cooldown_minutes=2.0)
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], cfg,
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+    )
+    buys = [t for t in result.trades if t.side == "buy"]
+    assert len(buys) == 2
+
+
+def test_same_token_cooldown_disabled_ignores_stop_loss_history():
+    df = _make_stopout_then_rebreakout_df()
+    cfg = RiskConfig(stop_loss_pct=8.0, require_same_token_cooldown=False)
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], cfg,
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+    )
+    buys = [t for t in result.trades if t.side == "buy"]
+    assert len(buys) == 2
 
 
 def test_run_backtest_score_gate_can_reject_on_failed_safety():

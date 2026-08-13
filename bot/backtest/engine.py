@@ -36,7 +36,7 @@ from bot.analysis.safety_filters import SafetyConfig, evaluate_safety
 from bot.analysis.scoring import ScoringWeights, compute_score
 from bot.data.models import DexPair, Liquidity, SignalAction, TokenRef, Trade, Txns, TxnWindow, WindowedFloats
 from bot.strategy.base import StrategyContext
-from bot.strategy.risk_manager import RiskConfig, create_position, evaluate_exits, size_position
+from bot.strategy.risk_manager import NEGATIVE_EXIT_KINDS, RiskConfig, create_position, evaluate_exits, size_position
 from bot.strategy.signals import run_strategies
 
 
@@ -237,6 +237,7 @@ def run_backtest(
     open_position = None
     trades: list[Trade] = []
     equity_curve: list[tuple[int, float]] = []
+    last_negative_exit_ts: int | None = None
 
     for i in range(warmup_bars, len(df)):
         bar = df.iloc[i]
@@ -272,8 +273,11 @@ def run_backtest(
                         timestamp=ts,
                         reason=action.reason,
                         realized_pnl_usd=realized,
+                        kind=action.kind,
                     )
                 )
+                if action.kind in NEGATIVE_EXIT_KINDS:
+                    last_negative_exit_ts = ts
                 if open_position.remaining_fraction <= 1e-6:
                     open_position = None
 
@@ -300,10 +304,11 @@ def run_backtest(
                 signals = run_strategies(ctx, active_strategies)
                 buy_signals = [s for s in signals if s.action == SignalAction.BUY]
 
-                # Confluence and higher-timeframe confirmation are quality
-                # filters on top of the score gate, not independent gates --
-                # raw mode (scoring_weights=None) skips every filter, not
-                # just the score, to show a strategy's unfiltered edge.
+                # Confluence, higher-timeframe confirmation, and the same-
+                # token cooldown are quality filters on top of the score
+                # gate, not independent gates -- raw mode (scoring_weights=
+                # None) skips every filter, not just the score, to show a
+                # strategy's unfiltered edge.
                 if scoring_weights is not None and buy_signals:
                     if len(buy_signals) < risk_cfg.min_agreeing_strategies:
                         buy_signals = []
@@ -311,6 +316,12 @@ def run_backtest(
                         risk_cfg.require_higher_timeframe_confirmation
                         and higher_tf_trend is not None
                         and higher_tf_trend[i] is False
+                    ):
+                        buy_signals = []
+                    elif (
+                        risk_cfg.require_same_token_cooldown
+                        and last_negative_exit_ts is not None
+                        and (ts - last_negative_exit_ts) < risk_cfg.same_token_cooldown_minutes * 60
                     ):
                         buy_signals = []
 
