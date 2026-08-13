@@ -46,7 +46,7 @@ explainable (`ScoreBreakdown.notes`):
 | Momentum | 20% | RSI zone + MACD histogram level/direction |
 | Volume | 20% | Volume z-score spike + buy/sell pressure + volume/liquidity health |
 | Volatility | 10% | ATR% of price — too low is dead, too high is unmanageable |
-| Liquidity/safety | 15% | Liquidity depth, FDV/liquidity ratio, pair age, safety-gate pass rate |
+| Liquidity/safety | 15% | Liquidity depth, FDV/liquidity ratio, pair age, safety-gate pass rate, holder concentration (Solana) |
 | Social | 10% | Presence of socials/website, active DexScreener boosts |
 
 Why these weights: trend and momentum dominate because they're the most
@@ -85,13 +85,54 @@ fails any of these is dropped regardless of how good its chart looks:
   Both are checked directly against the mint account, and **both fail
   closed**: if the RPC call fails or the account can't be parsed, memebot
   treats it as "not confirmed renounced" rather than assuming it's safe.
+- **Liquidity-crash / stability check** (`bot/analysis/liquidity_guard.py`)
+  — rejects entry if a pair's liquidity has dropped more than
+  `max_liquidity_drawdown_pct` (default 40%) from its recent peak, computed
+  purely from the price/liquidity ticks memebot has itself recorded while
+  watching the pair. This is a deliberate, practical substitute for
+  directly verifying *LP lock status*: reliably decoding "is the LP token
+  locked or burned" requires parsing each AMM program's own account layout
+  (Raydium, Orca, pump.fun, etc. all differ), and a wrong byte-offset guess
+  would silently produce an incorrect safety verdict — worse than not
+  having the check at all. Watching liquidity itself for a sudden drop
+  catches the same underlying danger (a rug in progress) without any
+  protocol-specific guessing. The same mechanism, at a stricter threshold,
+  is also the *highest-priority* exit check for open positions (see §5) —
+  arguably more important there than as an entry gate, since it protects
+  money already at risk.
+- **Holder concentration check** (Solana only, `getTokenLargestAccounts` +
+  `getTokenSupply`) — rejects entry if the top holders, *excluding* the
+  single largest one, control more than `max_top_holder_concentration_pct`
+  (default 70%) of supply. The largest holder is excluded because for a
+  freshly launched pool it's almost always the AMM's own liquidity vault —
+  a pool is supposed to hold a big share of supply, that's what liquidity
+  means, so including it would flag every healthy pool as "dangerously
+  concentrated." This is a heuristic, not a guarantee: it can occasionally
+  exclude a genuine large individual holder if they happen to hold more
+  than the pool itself (see `bot/data/solana_safety.py`).
+- **Sellability ("honeypot") pre-check** (Solana only,
+  `bot/data/honeypot_check.py`) — before ever buying, asks Jupiter's free
+  quote API for a hypothetical sell of the token back to USDC. If no route
+  exists, or the check itself can't complete, the gate fails closed. This
+  catches honeypots directly and independently of DexScreener's own stats
+  — a honeypot can have perfectly normal-looking price/volume/liquidity
+  numbers right up until you actually try to sell it. Only a quote is
+  requested (never a real transaction), so this works identically in paper
+  and live mode and needs no wallet.
 
-**What this does not catch**: liquidity-pool-side rugs (LP tokens not
-locked/burned — this build doesn't verify LP lock status), team wallets
-disguised as normal holders quietly accumulating before dumping, or
-outright fake volume/wash trading sophisticated enough to pass the
-volume/liquidity ratio check. No automated filter catches everything;
-these gates raise the floor, they don't guarantee safety.
+**What this does not catch**: the liquidity-crash check is a practical
+substitute for LP-lock verification, not the same thing — a slow,
+patient rug that never produces a sharp liquidity drop (or one that
+happens faster than the bot's scan interval can observe) can still slip
+through. The holder-concentration check is Solana-only and, per its
+excluded-largest-holder heuristic above, can be fooled by a whale bigger
+than the pool itself. Team wallets disguised as many separate normal-
+looking holders (rather than one concentrated one) won't be flagged by
+either check. And outright fake volume/wash trading sophisticated enough
+to pass the volume/liquidity ratio check, or sophisticated enough to also
+pass a Jupiter sell-quote probe, is still possible. No automated filter
+catches everything; these gates raise the floor, they don't guarantee
+safety.
 
 ## 4. Entry strategies (`bot/strategy/signals.py`)
 
@@ -120,6 +161,15 @@ tradeable — they aren't required to agree.
 
 ## 5. Risk management (`bot/strategy/risk_manager.py`)
 
+- **Liquidity-crash emergency exit**: checked *before* even the stop-loss,
+  and overrides every other exit rule. If a held position's liquidity has
+  dropped more than `emergency_exit_liquidity_drawdown_pct` (default 60% —
+  deliberately higher than the 40% entry gate in §3, since a moderate
+  wobble shouldn't panic-sell a position but a severe one should) from its
+  recent peak, the entire remaining position is exited immediately. This
+  exists because price can lag behind a liquidity pull — by the time a
+  falling price alone would trigger the stop-loss, the *effective* exit
+  price after slippage may already be far worse than what's quoted.
 - **Position sizing**: fixed-fractional — risk exactly `risk_per_trade_pct`
   of *current available cash* on the distance to the stop-loss, hard-capped
   at `max_allocation_pct_per_token` regardless of how tight the stop looks.
@@ -174,9 +224,12 @@ that:
   vary bar to bar in a backtest — only the age- and activity-derived parts
   of the safety gate and score do.
 - **Not evaluated at all**: Solana mint/freeze authority renouncement,
-  since there's no historical on-chain RPC feed to check it against. Those
-  two checks are disabled in every backtest regardless of config; they're
-  validated live, not historically.
+  holder concentration, sellability, and the liquidity-crash/stability
+  check, since none of these can be reconstructed from historical OHLCV
+  alone -- there's no historical on-chain RPC feed, no historical Jupiter
+  quote, and no historical tick-by-tick liquidity series to check them
+  against. All five are disabled in every backtest regardless of config;
+  they're validated live, not historically.
 
 Read the rest of the caveats in `bot/backtest/engine.py`'s docstring
 before trusting a result: fills happen at the current bar's close (no

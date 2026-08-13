@@ -166,14 +166,17 @@ def _interval_and_limit(days: int) -> tuple[int, int]:
 
 
 def _backtest_safety_cfg(cfg: AppConfig) -> SafetyConfig:
-    """Backtesting has no live RPC feed to check on-chain mint/freeze
-    authority state historically, so those two checks (which live scanning
-    enforces) are disabled regardless of config; every other threshold
-    (liquidity/volume/age/FDV-ratio/buy-pressure floors) still reflects
-    your configured values."""
+    """Backtesting has no live RPC/Jupiter feed to check on-chain mint/freeze
+    authority state, holder concentration, or sellability historically, so
+    those checks (which live scanning enforces) are disabled regardless of
+    config; every other threshold (liquidity/volume/age/FDV-ratio/buy-pressure
+    floors) still reflects your configured values."""
     safety = build_safety_config(cfg)
     safety.require_solana_mint_authority_renounced = False
     safety.require_solana_freeze_authority_renounced = False
+    safety.require_liquidity_stability_check = False
+    safety.require_holder_concentration_check = False
+    safety.require_sellable = False
     return safety
 
 

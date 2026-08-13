@@ -21,11 +21,13 @@ This is not boilerplate — it is specific to what this software trades:
   of principal. A handful produce outsized returns; the distribution is
   extremely fat-tailed, and no scoring model changes that distribution.
 - **Rug pulls and honeypots are common**, not edge cases. This bot checks
-  Solana mint/freeze authority renouncement and a few DexScreener-derived
-  heuristics, which catch some of the most common mechanisms — they do
-  not catch all of them (see `docs/STRATEGY.md` section 3 for what's
-  explicitly *not* covered, including unlocked LP tokens and insider
-  wallet accumulation).
+  Solana mint/freeze authority renouncement, holder concentration, a
+  pre-trade Jupiter sellability probe, a liquidity-crash/stability check,
+  and a few DexScreener-derived heuristics, which catch many of the most
+  common mechanisms — they do not catch all of them (see
+  `docs/STRATEGY.md` section 3 for what's explicitly *not* covered,
+  including slow rugs that never produce a sharp liquidity drop and
+  insider wallets disguised as many separate normal-looking holders).
 - **Liquidity can vanish instantly.** A pair with healthy-looking
   liquidity can be drained in a single transaction. Position sizing and
   stop-losses assume you can actually exit at close to the quoted price;

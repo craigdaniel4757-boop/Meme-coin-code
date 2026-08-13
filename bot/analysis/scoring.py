@@ -20,6 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from bot.data.models import DexPair, IndicatorSnapshot, SafetyResult, ScoreBreakdown
+from bot.data.solana_safety import HolderConcentration
 
 
 @dataclass(slots=True)
@@ -174,7 +175,9 @@ def _volatility_score(ind: IndicatorSnapshot) -> tuple[float, list[str]]:
     return score, notes
 
 
-def _liquidity_safety_score(pair: DexPair, safety: SafetyResult) -> tuple[float, list[str]]:
+def _liquidity_safety_score(
+    pair: DexPair, safety: SafetyResult, holder_concentration: HolderConcentration | None
+) -> tuple[float, list[str]]:
     notes: list[str] = []
 
     liq = pair.liquidity.usd or 0.0
@@ -204,8 +207,24 @@ def _liquidity_safety_score(pair: DexPair, safety: SafetyResult) -> tuple[float,
     checks_passed = sum(1 for v in safety.checks.values() if v)
     safety_component = checks_passed / checks_total * 100
 
+    # Degree, not just the hard gate's pass/fail: even concentration well
+    # under the gate's cutoff is worth scoring worse than concentration
+    # near zero. `holder_concentration` is Solana-only and best-effort
+    # (see bot/data/solana_safety.py), so this stays neutral without it.
+    concentration_component = 60.0
+    if holder_concentration is not None:
+        pct = holder_concentration.top_holders_excluding_largest_pct
+        if pct is not None:
+            concentration_component = _linear_scale(pct, 10, 70, 100, 20)
+            if pct > 50:
+                notes.append(f"holder concentration elevated ({pct:.0f}% ex-pool)")
+
     total = (
-        liq_component * 0.35 + ratio_component * 0.25 + age_component * 0.15 + safety_component * 0.25
+        liq_component * 0.30
+        + ratio_component * 0.20
+        + age_component * 0.15
+        + safety_component * 0.20
+        + concentration_component * 0.15
     )
     return total, notes
 
@@ -228,6 +247,7 @@ def compute_score(
     indicators: IndicatorSnapshot,
     safety: SafetyResult,
     weights: ScoringWeights,
+    holder_concentration: HolderConcentration | None = None,
 ) -> ScoreBreakdown:
     w = weights.normalized()
 
@@ -235,7 +255,7 @@ def compute_score(
     momentum, n2 = _momentum_score(indicators)
     volume, n3 = _volume_score(pair, indicators)
     volatility, n4 = _volatility_score(indicators)
-    liquidity_safety, n5 = _liquidity_safety_score(pair, safety)
+    liquidity_safety, n5 = _liquidity_safety_score(pair, safety, holder_concentration)
     social, n6 = _social_score(pair)
 
     total = (

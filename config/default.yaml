@@ -26,6 +26,9 @@ data:
   solana_rpc:
     url: "https://api.mainnet-beta.solana.com"   # overridden by SOLANA_RPC_URL env var
     requests_per_minute: 100
+  jupiter:
+    base_url: "https://quote-api.jup.ag/v6"       # free, keyless quote endpoint -- used for the
+    requests_per_minute: 30                       # pre-trade sellability ("honeypot") check
   candles:
     # If a pool has no OHLCV history available from GeckoTerminal yet, memebot
     # builds its own candles by resampling the price ticks it observes while
@@ -70,6 +73,21 @@ safety:
   require_solana_freeze_authority_renounced: true
   max_fdv_to_liquidity_ratio: 25.0
   min_buy_ratio_5m: 0.35              # reject if fewer than this fraction of 5m txns are buys (dump warning)
+  # Liquidity-crash detector: built from the bot's own recorded price/liquidity
+  # ticks rather than decoding each AMM's LP-lock on-chain layout (see
+  # bot/analysis/liquidity_guard.py for why). Also used as an emergency exit
+  # for open positions -- see risk.emergency_exit_liquidity_drawdown_pct below.
+  require_liquidity_stability_check: true
+  max_liquidity_drawdown_pct: 40.0    # reject entry if liquidity is down this much from its recent peak
+  # Solana-only: % of supply held by the largest wallets, excluding the
+  # single largest holder (assumed to be the pool itself) -- see
+  # bot/data/solana_safety.py for the exact heuristic and its limits.
+  require_holder_concentration_check: true
+  max_top_holder_concentration_pct: 70.0
+  # Solana-only: confirms Jupiter can actually quote a sell back to USDC
+  # before ever buying -- catches honeypots even when DexScreener's own
+  # stats look completely normal. See bot/data/honeypot_check.py.
+  require_sellable: true
   blacklist_tokens: []                # "chainId:pairAddress" entries never traded
 
 # ------------------------------------------------------------------------------
@@ -138,6 +156,11 @@ risk:
   max_hold_minutes: 720
   max_daily_loss_pct: 8.0             # circuit breaker: halt new entries for the day past this
   max_slippage_bps: 150
+  # Deliberately higher than safety.max_liquidity_drawdown_pct (the entry
+  # gate): a moderate liquidity wobble shouldn't panic-sell an open position,
+  # but a severe one overrides every other exit rule, including the
+  # stop-loss, since price can lag behind a liquidity pull.
+  emergency_exit_liquidity_drawdown_pct: 60.0
 
 # ------------------------------------------------------------------------------
 # Execution

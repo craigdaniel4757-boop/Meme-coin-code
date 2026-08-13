@@ -10,6 +10,7 @@ import pytest
 from bot.analysis.safety_filters import SafetyConfig, evaluate_safety
 from bot.analysis.scoring import ScoringWeights, compute_score
 from bot.data.models import IndicatorSnapshot, SafetyResult
+from bot.data.solana_safety import HolderAccount, HolderConcentration
 from tests.conftest import make_pair
 
 
@@ -33,7 +34,11 @@ def _bearish_indicators() -> IndicatorSnapshot:
 
 def _neutral_safety(pair) -> SafetyResult:
     cfg = SafetyConfig(
-        require_solana_mint_authority_renounced=False, require_solana_freeze_authority_renounced=False
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+        require_liquidity_stability_check=False,
+        require_holder_concentration_check=False,
+        require_sellable=False,
     )
     return evaluate_safety(pair, cfg)
 
@@ -90,3 +95,48 @@ def test_weights_normalize_even_if_not_summing_to_one():
     total = n.trend + n.momentum + n.volume + n.volatility + n.liquidity_safety + n.social
     assert total == pytest.approx(1.0)
     assert n.trend == pytest.approx(1 / 6)
+
+
+def test_holder_concentration_omitted_defaults_to_neutral_and_no_note():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    score = compute_score(pair, _bullish_indicators(), safety, ScoringWeights(), holder_concentration=None)
+
+    assert 0.0 <= score.liquidity_safety <= 100.0
+    assert not any("concentration" in note for note in score.notes)
+
+
+def test_healthy_holder_concentration_scores_better_than_concentrated():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    healthy = HolderConcentration(
+        mint_address="MINT",
+        fetched_ok=True,
+        top_holders=[
+            HolderAccount(address="PoolVault", ui_amount=600_000.0),  # largest -> excluded as the presumed pool
+            HolderAccount(address="Holder2", ui_amount=20_000.0),
+        ],
+        total_supply_ui=1_000_000.0,
+    )
+    concentrated = HolderConcentration(
+        mint_address="MINT",
+        fetched_ok=True,
+        top_holders=[
+            # The pool must stay the single *largest* holder for the "exclude
+            # the largest" heuristic to actually exclude it -- a whale
+            # bigger than the pool itself is the documented edge case where
+            # the heuristic breaks down, not what this fixture means to test.
+            HolderAccount(address="PoolVault", ui_amount=340_000.0),
+            HolderAccount(address="Whale", ui_amount=335_000.0),
+            HolderAccount(address="Whale2", ui_amount=325_000.0),
+        ],
+        total_supply_ui=1_000_000.0,
+    )
+
+    healthy_score = compute_score(pair, _bullish_indicators(), safety, ScoringWeights(), holder_concentration=healthy)
+    concentrated_score = compute_score(
+        pair, _bullish_indicators(), safety, ScoringWeights(), holder_concentration=concentrated
+    )
+
+    assert healthy_score.liquidity_safety > concentrated_score.liquidity_safety
+    assert any("concentration" in note for note in concentrated_score.notes)

@@ -143,6 +143,24 @@ def test_run_backtest_score_gate_can_block_all_entries():
     assert len(result.trades) == 0
 
 
+def test_run_backtest_score_gate_trades_with_default_safety_cfg():
+    """Regression test: the default `effective_safety_cfg` built internally
+    when no `safety_cfg` is passed must disable the holder-concentration,
+    sellability, and liquidity-stability checks the same way it already
+    disables the mint/freeze authority checks -- none of those can be
+    computed from historical OHLCV alone, and since they fail *closed*
+    with no data ever supplied in a backtest, leaving them enabled would
+    silently zero out every solana-chain backtest that uses the scoring
+    gate, not just the ones the safety thresholds are actually meant to
+    reject."""
+    df = make_breakout_df()
+    result = run_backtest(
+        df, "SMOKE", "solana", IndicatorParams(), {}, ["momentum_breakout"], _risk_cfg(),
+        scoring_weights=ScoringWeights(), min_score_to_trade=0.0,
+    )
+    assert len(result.trades) > 0
+
+
 def test_run_backtest_score_gate_can_reject_on_failed_safety():
     df = make_breakout_df()
     strict_safety = SafetyConfig(

@@ -1,12 +1,13 @@
 """The continuous scan -> filter -> score -> signal -> execute loop.
 
-`Scanner` owns every client (DexScreener, GeckoTerminal, Solana RPC) and
-runs a bounded-concurrency pipeline over however many candidates discovery
-turns up each cycle:
+`Scanner` owns every client (DexScreener, GeckoTerminal, Solana RPC,
+Jupiter) and runs a bounded-concurrency pipeline over however many
+candidates discovery turns up each cycle:
 
   discover (boosts/profiles/search/watchlist)
     -> cheap pre-filter (liquidity/volume/age/activity, no network)
-    -> per-candidate: candles -> indicators -> safety gate -> composite score -> strategies
+    -> per-candidate: candles -> indicators -> on-chain/liquidity/sellability
+       checks -> safety gate -> composite score -> strategies
     -> rank by score
     -> [only in `run`, not `scan`] manage existing positions, then size and
        enter new ones for whatever passed both the safety gate and the
@@ -27,6 +28,7 @@ from datetime import datetime, timezone
 from typing import Callable
 
 from bot.analysis.indicators import compute_indicator_snapshot
+from bot.analysis.liquidity_guard import compute_liquidity_trend
 from bot.analysis.safety_filters import evaluate_safety
 from bot.analysis.scoring import compute_score
 from bot.config import (
@@ -39,6 +41,7 @@ from bot.config import (
 from bot.data.candles import CandleProvider
 from bot.data.dexscreener import DexScreenerClient
 from bot.data.geckoterminal import GeckoTerminalClient
+from bot.data.honeypot_check import HoneypotCheckClient
 from bot.data.models import Candidate, DexPair, SignalAction
 from bot.data.solana_safety import SolanaSafetyClient
 from bot.execution.base import ExecutionProvider
@@ -84,6 +87,10 @@ class Scanner:
             rpc_url=cfg.data.solana_rpc.url,
             requests_per_minute=cfg.data.solana_rpc.requests_per_minute,
         )
+        self.honeypot_client = HoneypotCheckClient(
+            base_url=cfg.data.jupiter.base_url,
+            requests_per_minute=cfg.data.jupiter.requests_per_minute,
+        )
         self.candle_provider = CandleProvider(
             db=db,
             gecko_client=self.gecko_client,
@@ -105,6 +112,7 @@ class Scanner:
         if self.gecko_client is not None:
             await self._stack.enter_async_context(self.gecko_client)
         await self._stack.enter_async_context(self.solana_client)
+        await self._stack.enter_async_context(self.honeypot_client)
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:
@@ -207,16 +215,42 @@ class Scanner:
             if indicators.num_candles == 0 and price:
                 indicators.price = price
 
+            is_solana = pair.chainId == "solana" and bool(pair.baseToken.address)
+
+            # mint_info is also the source of `decimals` for the sellability
+            # probe below, so fetch it whenever either consumer needs it --
+            # avoids a second RPC round-trip just to look up decimals.
             mint_info = None
-            needs_solana_check = (
+            needs_mint_info = (
                 self.safety_cfg.require_solana_mint_authority_renounced
                 or self.safety_cfg.require_solana_freeze_authority_renounced
+                or self.safety_cfg.require_sellable
             )
-            if pair.chainId == "solana" and pair.baseToken.address and needs_solana_check:
+            if is_solana and needs_mint_info:
                 mint_info = await self.solana_client.get_mint_info(pair.baseToken.address)
 
-            safety = evaluate_safety(pair, self.safety_cfg, mint_info)
-            score = compute_score(pair, indicators, safety, self.scoring_weights)
+            holder_concentration = None
+            if is_solana and self.safety_cfg.require_holder_concentration_check:
+                holder_concentration = await self.solana_client.get_holder_concentration(pair.baseToken.address)
+
+            sell_check = None
+            if is_solana and self.safety_cfg.require_sellable and mint_info is not None and mint_info.decimals is not None:
+                sell_check = await self.honeypot_client.check_sellable(pair.baseToken.address, mint_info.decimals)
+
+            # Chain-agnostic and network-free (a pure read over ticks this
+            # bot already recorded), so always computed regardless of chain
+            # or which Solana-specific checks are enabled.
+            liquidity_trend = compute_liquidity_trend(self.db, pair.chainId, pair.pairAddress)
+
+            safety = evaluate_safety(
+                pair,
+                self.safety_cfg,
+                mint_info,
+                liquidity_trend=liquidity_trend,
+                holder_concentration=holder_concentration,
+                sell_check=sell_check,
+            )
+            score = compute_score(pair, indicators, safety, self.scoring_weights, holder_concentration)
 
             signals = []
             if safety.passed and score.total >= self.cfg.scoring.min_score_to_trade:
@@ -257,6 +291,14 @@ class Scanner:
             pair = await self.dex_client.get_pair(chain_id, pair_address)
             if pair is not None and pair.price_usd is not None:
                 out[(chain_id, pair_address)] = pair.price_usd
+                # An open position's pair may have fallen out of the
+                # discovery/pre-filter set that drives `_analyze_pair` (e.g.
+                # its liquidity just cratered, which is exactly the case the
+                # emergency exit needs to catch) -- record a tick here too so
+                # compute_liquidity_trend always has fresh data for it.
+                self.candle_provider.record_tick(
+                    chain_id, pair_address, int(time.time()), pair.price_usd, pair.volume.h24, pair.liquidity.usd
+                )
         return out
 
     async def manage_open_positions(self) -> None:
@@ -271,7 +313,8 @@ class Scanner:
             price = prices.get((position.chain_id, position.pair_address))
             if not price or price <= 0:
                 continue
-            for action in evaluate_exits(position, price, self.risk_cfg):
+            liquidity_trend = compute_liquidity_trend(self.db, position.chain_id, position.pair_address)
+            for action in evaluate_exits(position, price, self.risk_cfg, liquidity_trend=liquidity_trend):
                 trade = await self.execution.sell(position, action.fraction, price, action.reason)
                 if trade is not None and self.cfg.notifications.notify_on_trade:
                     await notify(

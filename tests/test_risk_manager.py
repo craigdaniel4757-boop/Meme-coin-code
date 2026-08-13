@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import pytest
 
+from bot.analysis.liquidity_guard import LiquidityTrend
 from bot.strategy.risk_manager import (
     RiskConfig,
     can_open_new_position,
@@ -175,3 +176,61 @@ def test_circuit_breaker_halts_on_depleted_bankroll():
     halted, reason = check_circuit_breaker(daily_realized_pnl_usd=0.0, bankroll_usd=0.0, cfg=cfg)
     assert halted
     assert "depleted" in reason
+
+
+def test_liquidity_crash_triggers_emergency_exit_before_stop_loss():
+    # Price hasn't even hit the stop-loss (entry 1.0, stop 0.85, current
+    # 0.95) -- the liquidity crash should still force a full exit, overriding
+    # every other exit rule since price can lag behind a liquidity pull.
+    cfg = _cfg(stop_loss_pct=15.0, emergency_exit_liquidity_drawdown_pct=60.0)
+    pos = _position(cfg)
+    crashed = LiquidityTrend(
+        have_data=True, current_liquidity_usd=8_000, recent_peak_liquidity_usd=25_000, drawdown_pct=68.0
+    )
+
+    actions = evaluate_exits(pos, current_price=0.95, cfg=cfg, now=pos.entry_time, liquidity_trend=crashed)
+
+    assert len(actions) == 1
+    assert actions[0].kind == "liquidity_crash"
+    assert actions[0].fraction == pytest.approx(1.0)
+
+
+def test_liquidity_crash_overrides_stop_loss_when_both_trigger():
+    cfg = _cfg(stop_loss_pct=15.0, emergency_exit_liquidity_drawdown_pct=60.0)
+    pos = _position(cfg)
+    crashed = LiquidityTrend(
+        have_data=True, current_liquidity_usd=5_000, recent_peak_liquidity_usd=25_000, drawdown_pct=80.0
+    )
+
+    # Price is also below the stop-loss (0.80 < 0.85) -- the liquidity
+    # crash action should still be the *only* action returned, not stacked
+    # with a separate stop-loss action.
+    actions = evaluate_exits(pos, current_price=0.80, cfg=cfg, now=pos.entry_time, liquidity_trend=crashed)
+
+    assert len(actions) == 1
+    assert actions[0].kind == "liquidity_crash"
+
+
+def test_liquidity_drawdown_below_emergency_threshold_does_not_trigger():
+    cfg = _cfg(stop_loss_pct=15.0, emergency_exit_liquidity_drawdown_pct=60.0)
+    pos = _position(cfg)
+    wobble = LiquidityTrend(
+        have_data=True, current_liquidity_usd=20_000, recent_peak_liquidity_usd=25_000, drawdown_pct=20.0
+    )
+
+    # Price hasn't hit the stop either -- nothing should fire.
+    actions = evaluate_exits(pos, current_price=0.95, cfg=cfg, now=pos.entry_time, liquidity_trend=wobble)
+
+    assert actions == []
+
+
+def test_liquidity_trend_without_data_does_not_affect_normal_exits():
+    cfg = _cfg(stop_loss_pct=15.0)
+    pos = _position(cfg)
+
+    actions = evaluate_exits(
+        pos, current_price=0.84, cfg=cfg, now=pos.entry_time, liquidity_trend=LiquidityTrend(have_data=False)
+    )
+
+    assert len(actions) == 1
+    assert actions[0].kind == "stop_loss"

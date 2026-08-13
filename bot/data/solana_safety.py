@@ -8,16 +8,25 @@ any public Solana RPC endpoint with no API key, via `getAccountInfo` +
 `jsonParsed` encoding, which the SPL Token program (and Token-2022) natively
 supports.
 
-This module fails *safe*: if the RPC call fails, or the account can't be
-parsed as a token mint, callers get `parsed_ok=False` rather than a
-guessed answer, and `safety_filters.py` treats "unknown" as a failing
-check rather than assuming the token is safe.
+This module also checks holder concentration via `getTokenLargestAccounts`
+-- another standard, keyless Solana RPC method that works identically for
+any SPL token regardless of which DEX/AMM it trades on (unlike verifying
+*which* pool holds the liquidity or whether its LP tokens are locked,
+which needs decoding each AMM program's own account layout and isn't
+attempted here -- see bot/analysis/liquidity_guard.py for how this
+project substitutes a liquidity-drawdown check for that instead).
+
+This module fails *safe*: if an RPC call fails, or an account can't be
+parsed as expected, callers get `parsed_ok=False` / `fetched_ok=False`
+rather than a guessed answer, and `safety_filters.py` treats "unknown" as
+a failing check (when the check was actually requested) rather than
+assuming the token is safe.
 """
 
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 from tenacity import retry, retry_if_exception, stop_after_attempt, wait_exponential_jitter
@@ -53,6 +62,40 @@ class MintAuthorityInfo:
     @property
     def freeze_authority_renounced(self) -> bool:
         return self.parsed_ok and self.freeze_authority is None
+
+
+@dataclass(slots=True)
+class HolderAccount:
+    address: str
+    ui_amount: float
+
+
+@dataclass(slots=True)
+class HolderConcentration:
+    mint_address: str
+    fetched_ok: bool
+    top_holders: list[HolderAccount] = field(default_factory=list)
+    total_supply_ui: float | None = None
+
+    @property
+    def top_holders_excluding_largest_pct(self) -> float | None:
+        """% of total supply held by the largest holders *after* excluding
+        the single biggest one. For a freshly launched pool, the #1 holder
+        by raw balance is almost always the AMM's own liquidity vault --
+        the pool is supposed to hold a big share of supply, that's what
+        liquidity means -- so including it would flag every healthy pool
+        as "dangerously concentrated." This is a heuristic, not a
+        guarantee: it can occasionally exclude a genuine large individual
+        holder if they happen to hold more than the pool itself. See
+        docs/STRATEGY.md.
+        """
+        if not self.fetched_ok or not self.total_supply_ui or self.total_supply_ui <= 0:
+            return None
+        if not self.top_holders:
+            return None
+        ranked = sorted(self.top_holders, key=lambda h: h.ui_amount, reverse=True)
+        rest = ranked[1:]
+        return sum(h.ui_amount for h in rest) / self.total_supply_ui * 100
 
 
 @dataclass
@@ -131,4 +174,45 @@ class SolanaSafetyClient:
             freeze_authority=info.get("freezeAuthority"),
             decimals=info.get("decimals"),
             supply=supply,
+        )
+
+    async def get_holder_concentration(self, mint_address: str) -> HolderConcentration:
+        try:
+            largest = await self._rpc("getTokenLargestAccounts", [mint_address])
+            supply = await self._rpc("getTokenSupply", [mint_address])
+        except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+            logger.info("Solana RPC holder lookup failed for %s: %s", mint_address, exc)
+            return HolderConcentration(mint_address=mint_address, fetched_ok=False)
+
+        if largest.get("error") or supply.get("error"):
+            logger.info(
+                "Solana RPC error fetching holders for %s: %s",
+                mint_address, largest.get("error") or supply.get("error"),
+            )
+            return HolderConcentration(mint_address=mint_address, fetched_ok=False)
+
+        try:
+            raw_holders = (largest.get("result") or {}).get("value") or []
+            holders = [
+                HolderAccount(address=h["address"], ui_amount=float(h.get("uiAmount") or 0.0))
+                for h in raw_holders
+                if h.get("address")
+            ]
+            total_supply_ui = float((supply.get("result") or {}).get("value", {}).get("uiAmount") or 0.0)
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            # AttributeError included alongside the more obvious KeyError/
+            # TypeError/ValueError: a malformed-but-200-status payload (e.g.
+            # "value" coming back as a string or a list of non-dict items)
+            # calls `.get()` on something that isn't a dict, which raises
+            # AttributeError rather than one of the "expected" exceptions --
+            # still just an unparseable response, not something that should
+            # crash the scan cycle.
+            logger.info("Could not parse holder data for %s: %s", mint_address, exc)
+            return HolderConcentration(mint_address=mint_address, fetched_ok=False)
+
+        return HolderConcentration(
+            mint_address=mint_address,
+            fetched_ok=True,
+            top_holders=holders,
+            total_supply_ui=total_supply_ui,
         )

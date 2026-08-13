@@ -31,10 +31,13 @@ activity — it does not, and cannot, guarantee profit.
    as the price history backing it, and this project is upfront about that
    in `docs/STRATEGY.md`.
 4. **Runs safety gates** — DexScreener FDV/liquidity sanity checks,
-   buy/sell pressure ratio, and (for Solana) an on-chain check that mint
-   and freeze authorities have been renounced. Anything that fails a hard
-   gate is dropped regardless of how good its chart looks. See
-   `bot/analysis/safety_filters.py`.
+   buy/sell pressure ratio, a liquidity-crash/stability check built from
+   the bot's own recorded price/liquidity history, and (for Solana) an
+   on-chain check that mint and freeze authorities have been renounced,
+   holder concentration among top wallets, and a pre-trade Jupiter
+   sellability probe that catches honeypots before ever buying. Anything
+   that fails a hard gate is dropped regardless of how good its chart
+   looks. See `bot/analysis/safety_filters.py`.
 5. **Scores what's left** — a weighted 0-100 composite of trend
    (EMA stack + slope), momentum (RSI + MACD), volume (z-score + buy/sell
    pressure), volatility (ATR/Bollinger width), liquidity/safety, and
@@ -46,8 +49,10 @@ activity — it does not, and cannot, guarantee profit.
 7. **Sizes and manages risk** — fixed-fractional position sizing off your
    configured bankroll, per-token exposure caps, a hard stop-loss, a
    staged take-profit ladder, an ATR-aware trailing stop once a position
-   is sufficiently in profit, a max-hold timer, and a daily-loss circuit
-   breaker that halts new entries for the day.
+   is sufficiently in profit, a max-hold timer, a liquidity-crash
+   emergency exit that overrides every other rule (including the
+   stop-loss) if a held position's liquidity craters, and a daily-loss
+   circuit breaker that halts new entries for the day.
 8. **Executes** — in paper mode (default) against a fully simulated
    portfolio with configurable slippage/fees, or in live mode as real
    swaps signed and sent through Jupiter on Solana.
@@ -109,10 +114,13 @@ so they can't accidentally end up committed.
 ## Architecture
 
 ```
-bot/data/        DexScreener + GeckoTerminal clients, Solana authority checks,
-                  local candle store, rate limiting, typed models
+bot/data/        DexScreener + GeckoTerminal clients, Solana on-chain checks
+                  (mint/freeze authority, holder concentration), Jupiter
+                  sellability probe, local candle store, rate limiting,
+                  typed models
 bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/VWAP/swings),
-                  composite scoring model, hard safety filters
+                  composite scoring model, hard safety filters,
+                  liquidity-crash detector
 bot/strategy/     Signal-generating strategies + the risk manager
                   (sizing, stop-loss, take-profit ladder, trailing stop,
                   circuit breaker)

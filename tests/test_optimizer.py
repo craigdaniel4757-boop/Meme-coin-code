@@ -46,7 +46,17 @@ def _make_pool(symbol: str, seed_base: int, n_cycles: int = 4) -> PoolSpec:
 
 
 def _neutral_safety_cfg() -> SafetyConfig:
-    return SafetyConfig(require_solana_mint_authority_renounced=False, require_solana_freeze_authority_renounced=False)
+    # None of these are computable from historical OHLCV alone (no live RPC/
+    # Jupiter feed in a backtest) and all fail *closed* -- leaving them
+    # enabled with no data ever supplied would silently disqualify every
+    # trial on every pool, regardless of what's actually being tested.
+    return SafetyConfig(
+        require_solana_mint_authority_renounced=False,
+        require_solana_freeze_authority_renounced=False,
+        require_liquidity_stability_check=False,
+        require_holder_concentration_check=False,
+        require_sellable=False,
+    )
 
 
 # -- _sample_weights ------------------------------------------------------------
@@ -139,11 +149,15 @@ def test_optimize_weights_end_to_end_on_synthetic_data():
         risk_cfg=RiskConfig(),
         safety_cfg=_neutral_safety_cfg(),
         min_score_to_trade=40.0,
-        min_trades_per_pool=2,
+        min_trades_per_pool=1,  # pool B's short synthetic series only ever produces 1 clean trade
     )
     result = optimize_weights(pools, cfg, trials=25, refine_rounds=10, seed=1)
 
     assert result.trials_run == 25
+    # The synthetic data has plenty of tradeable swings and min_trades_per_pool
+    # is a modest 1 -- the best trial should actually clear the bar, not just
+    # win by being "less disqualified" than an equally-empty baseline.
+    assert not result.best.disqualified
     assert result.best.fitness >= result.baseline.fitness or result.baseline.disqualified
     weight_sum = sum(getattr(result.best.weights, f) for f in WEIGHT_FIELDS)
     assert weight_sum == pytest.approx(1.0)

@@ -210,11 +210,16 @@ def run_backtest(
     )
     first_ts = int(df["timestamp"].iloc[0])
     effective_safety_cfg = safety_cfg or SafetyConfig(
-        # Backtesting has no live RPC feed to check on-chain authority
-        # state historically, so those two checks are excluded here --
-        # they're validated in live scanning, not in a backtest.
+        # Backtesting has no live RPC/Jupiter feed to check on-chain
+        # authority state, holder concentration, or sellability
+        # historically -- only checks computable purely from the OHLCV
+        # window itself (liquidity/volume/age/FDV/etc.) apply here. All are
+        # validated in live scanning, not in a backtest.
         require_solana_mint_authority_renounced=False,
         require_solana_freeze_authority_renounced=False,
+        require_liquidity_stability_check=False,
+        require_holder_concentration_check=False,
+        require_sellable=False,
     )
 
     cash = starting_bankroll_usd

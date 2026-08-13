@@ -44,6 +44,11 @@ class SolanaRpcConfig(BaseModel):
     requests_per_minute: int = 100
 
 
+class JupiterConfig(BaseModel):
+    base_url: str = "https://quote-api.jup.ag/v6"
+    requests_per_minute: int = 30
+
+
 class CandlesConfig(BaseModel):
     fallback_interval_seconds: int = 60
     max_local_candles: int = 2000
@@ -53,6 +58,7 @@ class DataConfig(BaseModel):
     dexscreener: DexScreenerConfig = Field(default_factory=DexScreenerConfig)
     geckoterminal: GeckoTerminalConfig = Field(default_factory=GeckoTerminalConfig)
     solana_rpc: SolanaRpcConfig = Field(default_factory=SolanaRpcConfig)
+    jupiter: JupiterConfig = Field(default_factory=JupiterConfig)
     candles: CandlesConfig = Field(default_factory=CandlesConfig)
     cache_ttl_seconds: int = 20
 
@@ -83,6 +89,11 @@ class SafetyYamlConfig(BaseModel):
     require_solana_freeze_authority_renounced: bool = True
     max_fdv_to_liquidity_ratio: float = 25.0
     min_buy_ratio_5m: float = 0.35
+    max_liquidity_drawdown_pct: float = 40.0
+    require_liquidity_stability_check: bool = True
+    max_top_holder_concentration_pct: float = 70.0
+    require_holder_concentration_check: bool = True
+    require_sellable: bool = True
     blacklist_tokens: list[str] = Field(default_factory=list)
 
 
@@ -135,6 +146,7 @@ class RiskYamlConfig(BaseModel):
     max_hold_minutes: float = 720.0
     max_daily_loss_pct: float = 8.0
     max_slippage_bps: float = 150.0
+    emergency_exit_liquidity_drawdown_pct: float = 60.0
 
 
 class PaperExecConfig(BaseModel):
@@ -241,6 +253,11 @@ def build_safety_config(cfg: AppConfig) -> SafetyConfig:
         require_solana_freeze_authority_renounced=s.require_solana_freeze_authority_renounced,
         max_fdv_to_liquidity_ratio=s.max_fdv_to_liquidity_ratio,
         min_buy_ratio_5m=s.min_buy_ratio_5m,
+        max_liquidity_drawdown_pct=s.max_liquidity_drawdown_pct,
+        require_liquidity_stability_check=s.require_liquidity_stability_check,
+        max_top_holder_concentration_pct=s.max_top_holder_concentration_pct,
+        require_holder_concentration_check=s.require_holder_concentration_check,
+        require_sellable=s.require_sellable,
         blacklist_tokens=list(s.blacklist_tokens),
     )
 
@@ -259,4 +276,5 @@ def build_risk_config(cfg: AppConfig) -> RiskConfig:
         max_hold_minutes=r.max_hold_minutes,
         max_daily_loss_pct=r.max_daily_loss_pct,
         max_slippage_bps=r.max_slippage_bps,
+        emergency_exit_liquidity_drawdown_pct=r.emergency_exit_liquidity_drawdown_pct,
     )

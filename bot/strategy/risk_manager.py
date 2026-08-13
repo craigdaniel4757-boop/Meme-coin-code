@@ -14,6 +14,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 
+from bot.analysis.liquidity_guard import LiquidityTrend
 from bot.data.models import Position, TakeProfitLevel
 
 
@@ -32,6 +33,11 @@ class RiskConfig:
     max_hold_minutes: float = 720.0
     max_daily_loss_pct: float = 8.0
     max_slippage_bps: float = 150.0
+    # Deliberately higher than SafetyConfig.max_liquidity_drawdown_pct (the
+    # entry gate): a moderate liquidity wobble shouldn't panic-sell an open
+    # position, but a severe one should override every other exit rule,
+    # including the stop-loss, since price can lag a liquidity pull.
+    emergency_exit_liquidity_drawdown_pct: float = 60.0
 
 
 @dataclass(slots=True)
@@ -119,11 +125,15 @@ def create_position(
 
 
 def evaluate_exits(
-    position: Position, current_price: float, cfg: RiskConfig, now: float | None = None
+    position: Position,
+    current_price: float,
+    cfg: RiskConfig,
+    now: float | None = None,
+    liquidity_trend: LiquidityTrend | None = None,
 ) -> list[ExitAction]:
-    """Check stop-loss, trailing stop, take-profit ladder, and max-hold
-    timer, in that priority order, and return the exit actions to execute
-    this cycle.
+    """Check liquidity crash, stop-loss, trailing stop, take-profit ladder,
+    and max-hold timer, in that priority order, and return the exit
+    actions to execute this cycle.
 
     Mutates `position` in place: updates `high_water_mark`, arms/tightens
     `trailing_stop_price`, and marks ladder rungs `filled` as they trigger.
@@ -140,6 +150,19 @@ def evaluate_exits(
     remaining = position.remaining_fraction
     if remaining <= 1e-9:
         return []
+
+    # Checked before even the stop-loss: a severe liquidity pull can crater
+    # a position's effective exit price faster than the price feed reflects
+    # it, so this overrides every other exit rule rather than waiting for
+    # price to "catch down" to a normal stop.
+    if liquidity_trend is not None and liquidity_trend.drawdown_exceeds(cfg.emergency_exit_liquidity_drawdown_pct):
+        return [
+            ExitAction(
+                fraction=remaining,
+                reason=f"liquidity crashed {liquidity_trend.drawdown_pct:.0f}% from its recent peak -- emergency exit",
+                kind="liquidity_crash",
+            )
+        ]
 
     if current_price <= position.stop_loss_price:
         return [ExitAction(fraction=remaining, reason=f"stop-loss hit ({gain_pct:.1f}%)", kind="stop_loss")]
