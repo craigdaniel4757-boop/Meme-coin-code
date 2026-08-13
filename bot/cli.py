@@ -58,14 +58,7 @@ async def _run_scan_once(cfg: AppConfig, db: Database):
         return await scanner.scan_once()
 
 
-def cmd_scan(args: argparse.Namespace) -> None:
-    cfg = _load(args.config)
-    db = Database(cfg.storage.sqlite_path)
-    try:
-        candidates = asyncio.run(_run_scan_once(cfg, db))
-    finally:
-        db.close()
-
+def _print_scan_table(candidates: list, limit: int = 25, min_score: float | None = None, show_top_notes: bool = True) -> None:
     table = Table(title=f"memebot scan -- {len(candidates)} candidates analyzed")
     for col, justify in [
         ("Symbol", None), ("Chain", None), ("Score", "right"), ("Safety", None),
@@ -75,7 +68,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
     shown = 0
     for c in candidates:
-        if args.min_score is not None and (not c.score or c.score.total < args.min_score):
+        if min_score is not None and (not c.score or c.score.total < min_score):
             continue
         score_txt = f"{c.score.total:.0f}" if c.score else "-"
         safety_txt = "[green]OK[/green]" if c.safety.passed else "[red]FAIL[/red]"
@@ -87,15 +80,26 @@ def cmd_scan(args: argparse.Namespace) -> None:
             c.pair.symbol, c.pair.chainId, score_txt, safety_txt, price_txt, liq_txt, vol_txt, signals_txt
         )
         shown += 1
-        if shown >= args.limit:
+        if shown >= limit:
             break
 
     console.print(table)
-    if candidates and candidates[0].score:
+    if show_top_notes and candidates and candidates[0].score:
         top = candidates[0]
         console.print(f"\n[bold]Top candidate:[/bold] {top.pair.symbol} ({top.pair.chainId}) -- score {top.score.total:.1f}")
         for note in top.score.notes:
             console.print(f"  - {note}")
+
+
+def cmd_scan(args: argparse.Namespace) -> None:
+    cfg = _load(args.config)
+    db = Database(cfg.storage.sqlite_path)
+    try:
+        candidates = asyncio.run(_run_scan_once(cfg, db))
+    finally:
+        db.close()
+
+    _print_scan_table(candidates, limit=args.limit, min_score=args.min_score)
 
 
 def _build_execution(cfg: AppConfig, db: Database, live_confirmed: bool):
@@ -125,6 +129,12 @@ def _build_execution(cfg: AppConfig, db: Database, live_confirmed: bool):
     )
 
 
+def _print_cycle_table(candidates: list) -> None:
+    stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    console.print(f"\n[dim]── scan cycle: {stamp} UTC ──[/dim]")
+    _print_scan_table(candidates, limit=15, show_top_notes=False)
+
+
 async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool) -> None:
     execution = _build_execution(cfg, db, live_confirmed)
     mode = "LIVE (real funds)" if cfg.execution.mode == "live" else "paper (simulated)"
@@ -133,7 +143,7 @@ async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool) -> No
         f"Scan interval: {cfg.scanner.scan_interval_seconds}s. Ctrl+C to stop."
     )
     async with Scanner(cfg, db, execution) as scanner:
-        await scanner.run_forever()
+        await scanner.run_forever(on_cycle_complete=_print_cycle_table)
 
 
 def cmd_run(args: argparse.Namespace) -> None:

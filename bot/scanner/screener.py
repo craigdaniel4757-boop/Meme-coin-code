@@ -24,6 +24,7 @@ import os
 import time
 from contextlib import AsyncExitStack
 from datetime import datetime, timezone
+from typing import Callable
 
 from bot.analysis.indicators import compute_indicator_snapshot
 from bot.analysis.safety_filters import evaluate_safety
@@ -334,7 +335,12 @@ class Scanner:
                         self.cfg.notifications,
                     )
 
-    async def run_forever(self) -> None:
+    async def run_forever(self, on_cycle_complete: Callable[[list[Candidate]], None] | None = None) -> None:
+        """`on_cycle_complete`, if given, is called with each cycle's
+        ranked candidate list right after scanning -- this is how the CLI
+        prints a live table each cycle without this module (which stays
+        presentation-agnostic, logging only) needing to know anything
+        about rich/console output."""
         interval = self.cfg.scanner.scan_interval_seconds
         retention = (
             self.cfg.data.candles.max_local_candles * self.cfg.data.candles.fallback_interval_seconds * 3
@@ -344,6 +350,9 @@ class Scanner:
             try:
                 await self.manage_open_positions()
                 candidates = await self.scan_once()
+
+                if on_cycle_complete is not None:
+                    on_cycle_complete(candidates)
 
                 actionable = [c for c in candidates if c.signals]
                 if actionable and self.cfg.notifications.notify_on_signal:
