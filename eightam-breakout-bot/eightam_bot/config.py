@@ -29,7 +29,8 @@ class GeneralConfig(BaseModel):
 
 
 class MarketConfig(BaseModel):
-    exchange: str = "binance"
+    data_source: str = "ccxt"  # "ccxt" (crypto exchange, live+backtest) or "yfinance" (stocks/ETFs, backtest-only)
+    exchange: str = "binance"  # only used when data_source: "ccxt"
     symbols: list[str] = Field(default_factory=lambda: ["BTC/USDT"])
     candle_timeframe: str = "1m"
 

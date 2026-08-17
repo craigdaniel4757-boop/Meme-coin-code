@@ -21,7 +21,7 @@ from rich.table import Table
 from eightam_bot.backtest.engine import run_backtest
 from eightam_bot.backtest.metrics import PerformanceMetrics, compute_metrics
 from eightam_bot.config import AppConfig, build_risk_config, build_strategy_config, exchange_credentials, load_config
-from eightam_bot.data_feed import CCXTDataFeed, CSVDataFeed, DataFeed
+from eightam_bot.data_feed import CCXTDataFeed, CSVDataFeed, DataFeed, YFinanceDataFeed
 from eightam_bot.execution.base import ExecutionProvider
 from eightam_bot.execution.ccxt_live import CcxtLiveExecutionProvider, LiveTradingError
 from eightam_bot.execution.paper import PaperExecutionProvider
@@ -59,14 +59,24 @@ def _resolve_backtest_window(args: argparse.Namespace) -> tuple[int, int]:
 
 
 async def _fetch_backtest_candles(cfg: AppConfig, since_ts: int, until_ts: int) -> dict[str, list[Candle]]:
+    """A per-symbol `data.csv_paths` entry always wins; otherwise falls back
+    to whichever of the two live data sources `market.data_source` names.
+    Both `CCXTDataFeed` and `YFinanceDataFeed` are created at most once and
+    shared across every symbol that needs them, mirroring how a single
+    exchange/API connection naturally serves several symbols."""
     out: dict[str, list[Candle]] = {}
     ccxt_feed: CCXTDataFeed | None = None
+    yfinance_feed: YFinanceDataFeed | None = None
     try:
         for symbol in cfg.market.symbols:
             csv_path = cfg.data.csv_paths.get(symbol)
             feed: DataFeed
             if csv_path:
                 feed = CSVDataFeed(csv_path)
+            elif cfg.market.data_source == "yfinance":
+                if yfinance_feed is None:
+                    yfinance_feed = YFinanceDataFeed()
+                feed = yfinance_feed
             else:
                 if ccxt_feed is None:
                     ccxt_feed = CCXTDataFeed(cfg.market.exchange, market_type=cfg.execution.live.market_type)
@@ -75,6 +85,8 @@ async def _fetch_backtest_candles(cfg: AppConfig, since_ts: int, until_ts: int) 
     finally:
         if ccxt_feed is not None:
             await ccxt_feed.close()
+        if yfinance_feed is not None:
+            await yfinance_feed.close()
     return out
 
 
@@ -232,6 +244,15 @@ def _load_retest_filter(cfg: AppConfig) -> RetestFilter | None:
 
 
 async def _run(cfg: AppConfig, live_confirmed: bool) -> None:
+    if cfg.market.data_source != "ccxt":
+        console.print(
+            f"[red]market.data_source is '{cfg.market.data_source}', but paper/live trading needs both "
+            "real-time data AND order execution -- only 'ccxt' (a crypto exchange) provides both right "
+            "now. yfinance is read-only and backtest-only (`backtest`/`train-filter`). Set "
+            "market.data_source: \"ccxt\" and market.symbols to a crypto pair to run paper/live.[/red]"
+        )
+        sys.exit(1)
+
     strategy_cfg = build_strategy_config(cfg)
     risk_cfg = build_risk_config(cfg)
     journal = TradeJournal(cfg.storage.journal_csv_path)

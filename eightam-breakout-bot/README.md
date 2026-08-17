@@ -53,19 +53,30 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
-cp .env.example .env   # fill in only what you need; paper mode and backtesting need nothing
+cp .env.example .env   # fill in only what you need; backtesting needs nothing at all
 
-# Backtest against a real exchange's historical candles (default: BTC/USDT on Binance).
-python -m eightam_bot backtest --days 90
-
-# Continuous paper trading (simulated fills, no real funds -- safe to leave running).
-python -m eightam_bot paper
+# Backtest against real historical data. The default config backtests Royal Bank of
+# Canada (NYSE: RY) using free Yahoo Finance data, capped at ~30 days of 1-minute
+# history -- hence --days 30 here (see Configuration below for switching to a crypto
+# pair with years of available history instead).
+python -m eightam_bot backtest --days 30
 
 # Current simulated (or live) bankroll and recent closed trades.
 python -m eightam_bot report
 ```
 
-Everything above runs in **paper trading mode** — `execution.mode` in
+The default config backtests a **stock** via free, read-only Yahoo Finance
+data — there's no broker behind it, so it can't paper/live trade. To
+actually run the bot (not just backtest it), switch `market.data_source` to
+`"ccxt"` and point `market.symbols`/`market.exchange` at a crypto pair (see
+[Configuration](#configuration)), then:
+
+```bash
+# Continuous paper trading (simulated fills, no real funds -- safe to leave running).
+python -m eightam_bot paper
+```
+
+Paper trading is **always** simulated — `execution.mode` in
 `config/default.yaml` defaults to `"paper"`, the `paper` subcommand forces
 it regardless of what's in your config, and nothing in this project ever
 sends a real order in that mode. See [Live trading](#live-trading) below
@@ -82,6 +93,13 @@ so they can't accidentally end up committed.
 
 A few settings worth knowing about up front:
 
+- **`market.data_source`** picks where candles come from: `"yfinance"`
+  (free Yahoo Finance stock/ETF data — the default, e.g. `symbols: ["RY"]`)
+  or `"ccxt"` (any crypto exchange, e.g. `exchange: "binance"`,
+  `symbols: ["BTC/USDT"]`). yfinance is **read-only and backtest-only** —
+  `paper`/`live` require `"ccxt"`, since that's the only source with any
+  order-execution counterpart. yfinance's free 1-minute history is also
+  capped at ~30 days; ccxt exchanges typically have years of it.
 - **`market.symbols`** is a list — the bot watches each symbol
   independently (its own range/breakout/retest/trade each day), sharing one
   account bankroll and one daily-loss circuit breaker across all of them.

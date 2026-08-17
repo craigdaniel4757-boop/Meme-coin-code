@@ -18,16 +18,30 @@ general:
   log_level: INFO
 
 # ------------------------------------------------------------------------------
-# Market data / instrument. Historical + live candles both come from the same
-# ccxt exchange connection by default; set data.csv_paths instead to backtest
-# against candles exported from a broker/TradingView -- useful if you want to
-# test the *exact* instrument (e.g. NQ/ES futures) the strategy was
-# originally filmed on, which ccxt (crypto exchanges only) cannot provide.
+# Market data / instrument.
+#
+# data_source: "yfinance" -- free stock/ETF data via Yahoo Finance. Read-only
+# and BACKTEST-ONLY (`backtest`/`train-filter`) -- there is no broker behind
+# it, so `paper`/`live` will refuse to start with this set. Defaults here to
+# Royal Bank of Canada (NYSE: RY -- note the ticker is "RY", not "RBC"; RBC on
+# NYSE is a different, unrelated company). Yahoo's free 1-minute history only
+# covers the trailing ~30 days -- see YFinanceDataFeed in eightam_bot/data_feed.py.
+#
+# data_source: "ccxt" -- any ccxt-supported crypto exchange. Works for both
+# backtesting AND live/paper trading (the only data source with an execution
+# counterpart), typically with years of 1-minute history available. Set
+# market.exchange to any ccxt exchange id and market.symbols to that
+# exchange's pairs (e.g. exchange: "binance", symbols: ["BTC/USDT"]).
+#
+# data.csv_paths (below) overrides either of the above per-symbol, for
+# backtesting against candles exported from a broker/TradingView -- useful
+# for testing the *exact* instrument (e.g. NQ/ES futures) the strategy was
+# originally filmed on, which neither yfinance nor ccxt can provide.
 # ------------------------------------------------------------------------------
 market:
-  exchange: "binance"          # any ccxt exchange id; backtesting only needs its public endpoints
-  symbols: ["BTC/USDT"]        # one bot instance can watch several symbols independently, each with
-                                # its own 8am range/breakout/retest/trade for the day
+  data_source: "yfinance"      # "yfinance" (stocks/ETFs, backtest-only) or "ccxt" (crypto, live+backtest)
+  exchange: "binance"          # only used when data_source: "ccxt" -- any ccxt exchange id
+  symbols: ["RY"]              # Royal Bank of Canada on NYSE. For ccxt instead, e.g. ["BTC/USDT"]
   candle_timeframe: "1m"       # base timeframe -- the 8:00-8:15 range is built from 15 of these
 
 data:

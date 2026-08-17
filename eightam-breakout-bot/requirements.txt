@@ -4,6 +4,7 @@
 ## and, opt-in, live order execution) is already a core dependency.
 
 ccxt>=4.3,<5.0                # exchange OHLCV data + (opt-in) live order execution
+yfinance>=0.2,<1.0              # free stock/ETF OHLCV for backtesting (data_source: "yfinance", read-only)
 httpx>=0.27,<1.0               # Telegram/Discord webhook alerts
 pandas>=2.1,<3.0              # OHLCV handling
 numpy>=1.26,<3.0              # numeric backbone

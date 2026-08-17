@@ -167,10 +167,19 @@ possibly-drifted reimplementation. What that does and doesn't capture:
   price impact the bot's own hypothetical order would have had, or a
   liquidity/gap event outside what the recorded candles show.
 - **Historical data source**: `data_feed.py`'s `CCXTDataFeed` pulls real
-  OHLCV from whatever exchange you configure — genuine market data, not
-  synthetic. `CSVDataFeed` backtests against a local file, which is the
-  only way to test this strategy against the actual futures instrument the
-  source video trades, since ccxt only covers crypto exchanges.
+  OHLCV from whatever crypto exchange you configure, typically with years of
+  1-minute history available. `YFinanceDataFeed` does the same for stocks/ETFs
+  via free Yahoo Finance data (the default config's Royal Bank of Canada
+  example) — genuine market data either way, not synthetic, but read-only
+  and backtest-only, and capped at roughly the trailing 30 days on a
+  1-minute timeframe. It also has to explicitly request pre-market data
+  (`prepost=True`): a stock's regular session doesn't open until 9:30am, so
+  without it Yahoo would return zero candles for the whole 8:00-8:15am range
+  window and every day would silently look like "no range formed" — worth
+  knowing if you ever see suspiciously few trades backtesting a stock.
+  `CSVDataFeed` backtests against a local file, which is the only way to
+  test this strategy against an instrument neither of the above covers at
+  all — e.g. the actual futures contract the source video trades.
 
 Use backtest results to compare parameter choices against each other on
 the same data, and as a sanity check on whether the strategy has *any*

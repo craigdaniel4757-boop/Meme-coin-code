@@ -10,10 +10,21 @@ from eightam_bot.config import build_risk_config, build_strategy_config, load_co
 
 def test_load_default_config():
     cfg = load_config("config/default.yaml")
+    assert cfg.market.data_source == "yfinance"
     assert cfg.market.exchange == "binance"
-    assert cfg.market.symbols == ["BTC/USDT"]
+    assert cfg.market.symbols == ["RY"]
     assert cfg.execution.mode == "paper"
     assert cfg.ml_filter.enabled is False
+
+
+def test_market_config_data_source_defaults_to_ccxt_when_unset():
+    # The pydantic model's own default (used when a user's config omits
+    # market.data_source entirely) should still be "ccxt", not "yfinance" --
+    # config/default.yaml explicitly opts into yfinance itself, but a
+    # minimal custom config shouldn't silently end up backtest-only.
+    from eightam_bot.config import MarketConfig
+
+    assert MarketConfig().data_source == "ccxt"
 
 
 def test_build_strategy_config_from_default_yaml():
