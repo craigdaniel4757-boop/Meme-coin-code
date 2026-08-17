@@ -1,0 +1,8 @@
+# Most patterns (venvs, __pycache__, .env, *.log, data/*.db) are already
+# covered repo-wide by the root .gitignore. This file only adds patterns
+# specific to this project's own generated artifacts.
+data/*.csv
+models/*.joblib
+models/*.pkl
+reports/
+*.png

@@ -1,0 +1,16 @@
+## Core runtime dependencies for data fetching, the strategy/backtest engine,
+## paper trading, the optional ML confidence filter, and the CLI. No extra
+## "live" requirements file is needed -- ccxt (used for both historical data
+## and, opt-in, live order execution) is already a core dependency.
+
+ccxt>=4.3,<5.0                # exchange OHLCV data + (opt-in) live order execution
+httpx>=0.27,<1.0               # Telegram/Discord webhook alerts
+pandas>=2.1,<3.0              # OHLCV handling
+numpy>=1.26,<3.0              # numeric backbone
+pydantic>=2.6,<3.0            # typed, validated configuration
+PyYAML>=6.0,<7.0              # config/default.yaml parsing
+python-dotenv>=1.0,<2.0       # .env loading for secrets
+rich>=13.7,<14.0               # CLI tables/output
+scikit-learn>=1.4,<2.0         # optional ML confidence filter (train-filter / ml_filter.enabled)
+joblib>=1.3,<2.0                # (de)serializing the trained filter model
+matplotlib>=3.8,<4.0             # equity-curve chart saved by `backtest`

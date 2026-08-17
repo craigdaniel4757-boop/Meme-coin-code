@@ -1,0 +1,122 @@
+# ==============================================================================
+# eightam-breakout-bot default configuration
+#
+# Implements the "8am break and retest" strategy: mark the 8:00-8:15am New
+# York session range, wait for a confirmed 1-minute breakout of it at or
+# after 9:30am, then enter on a retest of the range's midpoint with a stop
+# just beyond the opposite boundary and a fixed R-multiple target. See
+# docs/STRATEGY.md for the full rationale and docs/RISK_DISCLAIMER.md before
+# ever setting execution.mode to "live".
+#
+# Copy this file (e.g. to config/local.yaml) and override values instead of
+# editing this one in place, then run with `--config config/local.yaml`.
+# Secrets (exchange API keys, notification tokens) come from environment
+# variables / .env -- see .env.example -- never from this file.
+# ==============================================================================
+
+general:
+  log_level: INFO
+
+# ------------------------------------------------------------------------------
+# Market data / instrument. Historical + live candles both come from the same
+# ccxt exchange connection by default; set data.csv_paths instead to backtest
+# against candles exported from a broker/TradingView -- useful if you want to
+# test the *exact* instrument (e.g. NQ/ES futures) the strategy was
+# originally filmed on, which ccxt (crypto exchanges only) cannot provide.
+# ------------------------------------------------------------------------------
+market:
+  exchange: "binance"          # any ccxt exchange id; backtesting only needs its public endpoints
+  symbols: ["BTC/USDT"]        # one bot instance can watch several symbols independently, each with
+                                # its own 8am range/breakout/retest/trade for the day
+  candle_timeframe: "1m"       # base timeframe -- the 8:00-8:15 range is built from 15 of these
+
+data:
+  csv_paths: {}                # optional: {"BTC/USDT": "data/btcusdt_1m.csv"} to backtest from a local
+                                # OHLCV file instead of fetching from the exchange (columns: timestamp,
+                                # open,high,low,close,volume -- timestamp in unix seconds, UTC)
+
+# ------------------------------------------------------------------------------
+# Session timing. All times below are wall-clock in session.timezone -- always
+# America/New_York regardless of where the bot itself runs or what timezone
+# the exchange reports candles in, since the strategy's edge is specifically
+# tied to positioning ahead of the New York equity open. zoneinfo handles the
+# EST/EDT switch automatically.
+# ------------------------------------------------------------------------------
+session:
+  timezone: "America/New_York"
+  range_start: "08:00"
+  range_end: "08:15"             # the 8:00-8:15 15-minute candle -- see docs/STRATEGY.md #1
+  trade_window_start: "09:30"    # breakouts before this are ignored -- "not enough volume yet" (video's words)
+  trade_window_end: "11:00"      # stop looking for new setups after this
+  force_close_time: "12:00"      # flatten any still-open trade by this time regardless of stop/target --
+                                  # a safety net the video doesn't need (a futures/equities session just
+                                  # ends), but crypto trades 24/7 so a runaway hold needs an explicit cutoff
+  trading_days: [0, 1, 2, 3, 4]  # Mon-Fri (0=Mon) -- the "institutions positioning before NY open" premise
+                                  # this strategy is built on doesn't really apply on a weekend
+
+# ------------------------------------------------------------------------------
+# Breakout + retest mechanics
+# ------------------------------------------------------------------------------
+breakout:
+  confirmation: "close"          # "close" (a 1m candle must CLOSE beyond the range -- filters out wicks,
+                                  # matches "a clear break" in the video) or "wick" (any touch counts)
+
+# ------------------------------------------------------------------------------
+# Risk management -- applies identically to paper and live execution. Entry
+# is always the range's midpoint; stop and target are derived from it. See
+# docs/STRATEGY.md #3 for why stop placement uses the zone boundary rather
+# than a fixed points offset from the midpoint (the video shows both,
+# inconsistently -- the zone boundary is the one it actually explains a
+# *reason* for: "Asia low acts as a magnet," i.e. a clear invalidation level).
+# ------------------------------------------------------------------------------
+risk:
+  stop_buffer_type: "percent"    # "percent" (of the boundary price) or "points" (raw price units --
+                                  # what the video actually uses, e.g. "5 points," on futures instruments)
+  stop_buffer_value: 0.12        # percent example: 0.12% beyond the range boundary
+  take_profit_mode: "r_multiple" # "r_multiple", "percent", or "points"
+  take_profit_value: 3.0         # 3R ~ the video's 5-point-stop / 15-point-target examples
+  risk_per_trade_pct: 1.0        # % of bankroll risked (to stop) per trade
+  max_daily_loss_pct: 4.0        # circuit breaker: halt new entries for the rest of the day past this
+  starting_bankroll_usd: 10000.0
+
+# ------------------------------------------------------------------------------
+# Optional statistical confidence filter -- see eightam_bot/ml_filter.py and
+# docs/STRATEGY.md #7. Off by default: every rule above is fully mechanical
+# and the bot trades identically without this. Needs a model file trained on
+# your own backtest history first: `python -m eightam_bot train-filter`.
+# ------------------------------------------------------------------------------
+ml_filter:
+  enabled: false
+  model_path: "models/retest_filter.joblib"
+  min_confidence: 0.55
+
+# ------------------------------------------------------------------------------
+# Execution
+# ------------------------------------------------------------------------------
+execution:
+  mode: "paper"                  # "paper" (default, simulated) or "live" (real orders via ccxt)
+  paper:
+    simulated_slippage_bps: 5.0
+    simulated_fee_bps: 4.0
+  live:
+    market_type: "spot"          # "spot" (long-only -- most exchanges can't short spot) or "swap"/"future"
+                                  # (margin/perpetuals -- required for the strategy's short side; needs an
+                                  # exchange + account actually configured for margin trading, see README)
+    max_slippage_bps: 30.0
+    required_confirm_phrase: "I UNDERSTAND THE RISK"
+
+# ------------------------------------------------------------------------------
+# Notifications
+# ------------------------------------------------------------------------------
+notifications:
+  telegram_enabled: false
+  discord_enabled: false
+  notify_on_range: false
+  notify_on_breakout: true
+  notify_on_trade: true
+
+# ------------------------------------------------------------------------------
+# Storage
+# ------------------------------------------------------------------------------
+storage:
+  journal_csv_path: "data/trade_journal.csv"
