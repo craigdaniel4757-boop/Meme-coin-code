@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>MineRandomizer</RootNamespace>
+    <AssemblyName>MineRandomizer</AssemblyName>
+    <Description>Randomizes Stardew Valley's mine floors, ore, and chest loot.</Description>
+
+    <!-- Auto-adds a Lib.Harmony reference matching the version SMAPI ships. -->
+    <EnableHarmony>true</EnableHarmony>
+
+    <!-- Points the build at your local Stardew Valley install and copies the built mod there. -->
+    <EnableModZip>true</EnableModZip>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Pathoschild.Stardew.ModBuildConfig" Version="4.1.1" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,10 @@
+{
+  "Name": "Mine Randomizer",
+  "Author": "YourName",
+  "Version": "1.0.0",
+  "Description": "Randomizes the mines: each floor's ore/theme/monster mix is shuffled, chest loot gets re-rolled, and you can spawn on a random floor when you enter.",
+  "UniqueID": "YourName.MineRandomizer",
+  "MinimumApiVersion": "4.0.0",
+  "EntryDll": "MineRandomizer.dll",
+  "UpdateKeys": []
+}
