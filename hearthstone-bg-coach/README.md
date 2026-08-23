@@ -65,6 +65,13 @@ This starts the API on `http://localhost:8787` and the web app on `http://localh
 
 No video handy? Click **"See a sample report"** on the landing page — it's the same report UI, pre-populated with a full 17-turn analyzed game.
 
+## Deploying
+
+There's a `Dockerfile` at the project root that builds and serves the whole
+app (frontend + API) as one container on one port — it works unmodified on
+Render, Railway, Fly.io, or any other Docker-capable host. Step-by-step
+instructions (Render first, with notes for the others): **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**.
+
 ## Project layout
 
 ```

@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import path from "node:path";
 import cors from "cors";
 import express, { NextFunction, Request, Response } from "express";
 import { config, paths } from "./config";
@@ -17,6 +19,24 @@ app.use("/api/reports", reportsRouter);
 // Serves uploaded videos back so the report page's <video> element can play
 // them, synced to whatever timestamps the report references.
 app.use("/media/videos", express.static(paths.videos));
+
+// Single-service production deployment: if the web app has been built
+// (apps/web/dist - see the Dockerfile), serve it from this same process
+// and fall back to index.html for any non-API/media GET so client-side
+// routing (e.g. a direct visit to /report/sample) works. In local dev the
+// dist dir won't exist yet - Vite's own dev server handles the frontend
+// instead, and this block is skipped entirely.
+const webDistDir = path.join(__dirname, "../../web/dist");
+if (fs.existsSync(webDistDir)) {
+  app.use(express.static(webDistDir));
+  app.get(/.*/, (req: Request, res: Response, next: NextFunction) => {
+    if (req.path.startsWith("/api/") || req.path.startsWith("/media/")) {
+      next();
+      return;
+    }
+    res.sendFile(path.join(webDistDir, "index.html"));
+  });
+}
 
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: `No route for ${req.method} ${req.path}` });
