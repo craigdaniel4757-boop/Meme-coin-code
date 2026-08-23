@@ -34,6 +34,13 @@ export function buildTimeline(readings: GlobalFrameReading[]): TimelineResult {
     const best = pickRepresentativeReading(candidates);
     if (!best) continue;
 
+    // Board is sourced separately from every other field, and only ever
+    // from a recruit-phase reading. A combat frame's board reading (even a
+    // correctly-labeled one) is exactly the risky case for player/opponent
+    // mixups - if no recruit-phase frame was captured this turn, an empty
+    // board is the safe outcome, not a fallback to a combat frame.
+    const boardSource = pickBoardSource(candidates);
+
     const health: number = best.heroHealth ?? previousHealth ?? 40;
     const isFirstSnapshot = previousHealth == null;
     const healthDelta = isFirstSnapshot ? 0 : health - previousHealth!;
@@ -56,7 +63,7 @@ export function buildTimeline(readings: GlobalFrameReading[]): TimelineResult {
       health,
       healthDelta,
       armor: best.armor ?? 0,
-      board: best.board,
+      board: boardSource?.board ?? [],
       shopOffers: best.shopMinions,
       heroPowerUsed: best.heroPowerAvailable === false,
       // Not reliably observable from periodic screenshots without an action
@@ -85,6 +92,22 @@ function pickRepresentativeReading(candidates: GlobalFrameReading[]): GlobalFram
     return b.timestampSec - a.timestampSec; // prefer the latest read of the turn - closest to final decisions
   });
   return sorted[0] ?? null;
+}
+
+/**
+ * Board only ever comes from a recruit-phase reading - never a combat
+ * frame, even as a fallback. Returns null (empty board) if this turn has no
+ * recruit-phase reading at all, rather than risking an opponent's board.
+ */
+function pickBoardSource(candidates: GlobalFrameReading[]): GlobalFrameReading | null {
+  const recruitReadings = candidates.filter((c) => c.phase === "recruit");
+  if (recruitReadings.length === 0) return null;
+  const sorted = [...recruitReadings].sort((a, b) => {
+    const confDiff = CONFIDENCE_RANK[b.confidence] - CONFIDENCE_RANK[a.confidence];
+    if (confDiff !== 0) return confDiff;
+    return b.timestampSec - a.timestampSec;
+  });
+  return sorted[0];
 }
 
 function inferCombatResult(healthDelta: number, isFirstSnapshot: boolean): CombatResult {
