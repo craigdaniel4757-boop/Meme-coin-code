@@ -1,0 +1,90 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * TavernIQ ships one deliberate look: a dark, data-dense coaching-tool
+ * aesthetic (in the vein of Mobalytics/Blitz-style esports analytics), with
+ * an amber/gold primary nodding to Battlegrounds' tavern-gold theme and a
+ * violet accent for secondary emphasis. Tokens are still CSS variables so a
+ * light mode could be added later without touching component code.
+ */
+@layer base {
+  :root {
+    --background: 222 34% 6%;
+    --foreground: 210 25% 96%;
+
+    --card: 222 28% 9%;
+    --card-foreground: 210 25% 96%;
+
+    --border: 222 18% 17%;
+    --input: 222 18% 17%;
+    --ring: 38 92% 55%;
+
+    --primary: 38 92% 55%;
+    --primary-foreground: 26 45% 9%;
+
+    --secondary: 222 20% 15%;
+    --secondary-foreground: 210 25% 96%;
+
+    --muted: 222 20% 13%;
+    --muted-foreground: 220 12% 65%;
+
+    --accent: 262 72% 68%;
+    --accent-foreground: 260 45% 8%;
+
+    --destructive: 0 72% 58%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 142 60% 45%;
+    --success-foreground: 140 45% 8%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 26 45% 9%;
+
+    --info: 199 89% 60%;
+    --info-foreground: 199 60% 8%;
+
+    --radius: 0.75rem;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    color-scheme: dark;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "ss01";
+    background-image: radial-gradient(circle at 15% 0%, hsl(var(--primary) / 0.08), transparent 45%),
+      radial-gradient(circle at 85% 15%, hsl(var(--accent) / 0.07), transparent 40%);
+    background-attachment: fixed;
+  }
+
+  ::selection {
+    background: hsl(var(--primary) / 0.3);
+  }
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--border)) transparent;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border));
+    border-radius: 999px;
+  }
+}

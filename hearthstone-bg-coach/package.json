@@ -1,0 +1,19 @@
+{
+  "name": "tavern-iq",
+  "private": true,
+  "version": "0.1.0",
+  "description": "TavernIQ - AI-powered VOD coaching for Hearthstone Battlegrounds",
+  "scripts": {
+    "dev": "concurrently -n WEB,API -c blue,green \"npm --prefix apps/web run dev\" \"npm --prefix apps/server run dev\"",
+    "install:all": "npm --prefix apps/web install && npm --prefix apps/server install",
+    "build": "npm --prefix apps/server run build && npm --prefix apps/web run build",
+    "typecheck": "npm --prefix apps/server run typecheck && npm --prefix apps/web run typecheck",
+    "lint": "npm --prefix apps/web run lint"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
