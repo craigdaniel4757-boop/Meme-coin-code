@@ -99,6 +99,10 @@ python -m bot scan
 # or live, just a live-updating table (Ctrl+C to stop).
 python -m bot scan --loop
 
+# Add --buy-only to either scan command to hide every HOLD row and show
+# only what's actually flagged tradeable.
+python -m bot scan --loop --buy-only
+
 # Continuous paper trading (simulated fills, no real funds, safe to leave running).
 python -m bot run
 

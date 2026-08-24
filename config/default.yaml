@@ -42,7 +42,12 @@ data:
 # Universe discovery / continuous scanning
 # ------------------------------------------------------------------------------
 scanner:
-  chains: ["solana", "ethereum", "base", "bsc"]
+  # Solana only -- fastest-moving/highest meme-coin activity of the four,
+  # and this bot's on-chain safety checks (mint/freeze authority, holder
+  # concentration, honeypot probe) only exist for Solana anyway, so
+  # restricting to it means every candidate gets the full check set rather
+  # than a mix of chains where some get less scrutiny than others.
+  chains: ["solana"]
   discovery:
     use_latest_boosted: true
     use_top_boosted: true
@@ -130,7 +135,14 @@ indicators:
 # score.
 # ------------------------------------------------------------------------------
 strategy:
-  active: ["momentum_breakout", "volume_spike_breakout", "trend_pullback", "bollinger_squeeze_breakout"]
+  # Specialized for short-term momentum: all three active strategies enter
+  # on a breakout/expansion already in progress (see docs/STRATEGY.md
+  # section 4). trend_pullback is deliberately left out here -- it's the
+  # one strategy in the set built around a different, slower philosophy
+  # (buying a dip within an already-established trend rather than chasing
+  # a fresh move), which doesn't fit "hyper specialize in quick profits."
+  # Its params are left below, untouched, in case you want it back later.
+  active: ["momentum_breakout", "volume_spike_breakout", "bollinger_squeeze_breakout"]
   momentum_breakout:
     breakout_lookback: 20
     min_volume_zscore: 1.5
@@ -157,13 +169,22 @@ risk:
   max_concurrent_positions: 6
   max_allocation_pct_per_token: 15.0  # hard cap regardless of risk_per_trade_pct sizing
   stop_loss_pct: 15.0
-  take_profit_ladder:                 # [gain_pct, fraction_of_position_to_sell]
-    - [50, 0.25]
-    - [100, 0.25]
-    - [200, 0.25]
-  trailing_stop_activate_pct: 40.0    # trailing stop only arms after this much unrealized gain
-  trailing_stop_distance_pct: 18.0
-  max_hold_minutes: 720
+  # Quick-profit tuning: bank real gains fast and often instead of chasing
+  # 50-200% moves that take longer to play out (or reverse before getting
+  # there) -- [gain_pct, fraction_of_position_to_sell].
+  take_profit_ladder:
+    - [15, 0.3]
+    - [30, 0.3]
+    - [60, 0.4]
+  # Arms much sooner (12% vs. the original 40%) so a fast pop's gains get
+  # locked in quickly rather than needing a huge run first, and trails
+  # tighter (10% vs. 18%) so less of a quick move gets given back once armed.
+  trailing_stop_activate_pct: 12.0
+  trailing_stop_distance_pct: 10.0
+  # Force-close anything that hasn't resolved within 2 hours -- short-term
+  # momentum trades should play out fast; capital stuck longer than that in
+  # a going-nowhere position isn't the "quick profits" this is tuned for.
+  max_hold_minutes: 120
   max_daily_loss_pct: 8.0             # circuit breaker: halt new entries for the day past this
   max_slippage_bps: 150
   # Deliberately higher than safety.max_liquidity_drawdown_pct (the entry

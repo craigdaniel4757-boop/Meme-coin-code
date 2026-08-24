@@ -59,14 +59,16 @@ async def _run_scan_once(cfg: AppConfig, db: Database):
         return await scanner.scan_once()
 
 
-async def _run_scan_loop(cfg: AppConfig, db: Database) -> None:
+async def _run_scan_loop(cfg: AppConfig, db: Database, buy_only: bool = False) -> None:
     """Same continuous cadence as `run`, minus execution entirely: a
     Scanner with no execution provider makes `manage_open_positions`/
     `enter_new_positions` no-ops (see bot/scanner/screener.py), so this is
     a live-updating table only -- no portfolio, no trades, paper or live."""
     async with Scanner(cfg, db) as scanner:
         await scanner.run_forever(
-            on_cycle_complete=lambda candidates: _print_cycle_table(candidates, cfg.risk.min_agreeing_strategies)
+            on_cycle_complete=lambda candidates: _print_cycle_table(
+                candidates, cfg.risk.min_agreeing_strategies, buy_only=buy_only
+            )
         )
 
 
@@ -76,6 +78,7 @@ def _print_scan_table(
     min_score: float | None = None,
     show_top_notes: bool = True,
     min_agreeing_strategies: int = 1,
+    buy_only: bool = False,
 ) -> None:
     table = Table(title=f"memebot scan -- {len(candidates)} candidates analyzed")
     for col, justify, overflow in [
@@ -93,11 +96,13 @@ def _print_scan_table(
     for c in candidates:
         if min_score is not None and (not c.score or c.score.total < min_score):
             continue
-        score_txt = f"{c.score.total:.0f}" if c.score else "-"
-        safety_txt = "[green]OK[/green]" if c.safety.passed else "[red]FAIL[/red]"
         buy_count = sum(1 for s in c.signals if s.action == SignalAction.BUY)
         is_buy = buy_count >= min_agreeing_strategies
+        if buy_only and not is_buy:
+            continue
         any_buy = any_buy or is_buy
+        score_txt = f"{c.score.total:.0f}" if c.score else "-"
+        safety_txt = "[green]OK[/green]" if c.safety.passed else "[red]FAIL[/red]"
         action_txt = "[bold green]BUY[/bold green]" if is_buy else "[dim]HOLD[/dim]"
         price_txt = f"${c.pair.price_usd:.8g}" if c.pair.price_usd else "-"
         liq_txt = f"${c.pair.liquidity.usd:,.0f}" if c.pair.liquidity.usd else "-"
@@ -120,6 +125,8 @@ def _print_scan_table(
             "trend, market regime, same-token cooldown) are only applied right before the bot actually "
             "places a trade, and can still hold one back.[/dim]"
         )
+    elif buy_only:
+        console.print("[dim]No BUY signals this cycle.[/dim]")
     # Printed as a plain list rather than a table column: a DexScreener URL
     # is ~60 characters, which would force multi-line wrapping inside a
     # bordered cell (interleaved with box-drawing characters) that's awkward
@@ -145,7 +152,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
             f"Scan interval: {cfg.scanner.scan_interval_seconds}s. Ctrl+C to stop."
         )
         try:
-            asyncio.run(_run_scan_loop(cfg, db))
+            asyncio.run(_run_scan_loop(cfg, db, buy_only=args.buy_only))
         except KeyboardInterrupt:
             console.print("\n[yellow]Stopped.[/yellow]")
         finally:
@@ -159,7 +166,7 @@ def cmd_scan(args: argparse.Namespace) -> None:
 
     _print_scan_table(
         candidates, limit=args.limit, min_score=args.min_score,
-        min_agreeing_strategies=cfg.risk.min_agreeing_strategies,
+        min_agreeing_strategies=cfg.risk.min_agreeing_strategies, buy_only=args.buy_only,
     )
 
 
@@ -190,13 +197,16 @@ def _build_execution(cfg: AppConfig, db: Database, live_confirmed: bool):
     )
 
 
-def _print_cycle_table(candidates: list, min_agreeing_strategies: int) -> None:
+def _print_cycle_table(candidates: list, min_agreeing_strategies: int, buy_only: bool = False) -> None:
     stamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
     console.print(f"\n[dim]── scan cycle: {stamp} UTC ──[/dim]")
-    _print_scan_table(candidates, limit=15, show_top_notes=False, min_agreeing_strategies=min_agreeing_strategies)
+    _print_scan_table(
+        candidates, limit=15, show_top_notes=False,
+        min_agreeing_strategies=min_agreeing_strategies, buy_only=buy_only,
+    )
 
 
-async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool) -> None:
+async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool, buy_only: bool = False) -> None:
     execution = _build_execution(cfg, db, live_confirmed)
     mode = "LIVE (real funds)" if cfg.execution.mode == "live" else "paper (simulated)"
     console.print(
@@ -205,7 +215,9 @@ async def _run_forever(cfg: AppConfig, db: Database, live_confirmed: bool) -> No
     )
     async with Scanner(cfg, db, execution) as scanner:
         await scanner.run_forever(
-            on_cycle_complete=lambda candidates: _print_cycle_table(candidates, cfg.risk.min_agreeing_strategies)
+            on_cycle_complete=lambda candidates: _print_cycle_table(
+                candidates, cfg.risk.min_agreeing_strategies, buy_only=buy_only
+            )
         )
 
 
@@ -215,7 +227,7 @@ def cmd_run(args: argparse.Namespace) -> None:
         cfg.execution.mode = "paper"
     db = Database(cfg.storage.sqlite_path)
     try:
-        asyncio.run(_run_forever(cfg, db, args.i_understand_the_risk))
+        asyncio.run(_run_forever(cfg, db, args.i_understand_the_risk, buy_only=args.buy_only))
     except KeyboardInterrupt:
         console.print("\n[yellow]Stopped.[/yellow]")
     finally:
@@ -500,6 +512,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Keep scanning forever on the configured interval instead of running once (Ctrl+C to stop). "
         "Never executes trades, paper or live -- a live-updating read-only report only.",
     )
+    p_scan.add_argument(
+        "--buy-only", action="store_true",
+        help="Only show rows flagged BUY (agreeing strategies + safety + score already cleared) -- hides "
+        "every HOLD row instead of showing the full ranked candidate list.",
+    )
     p_scan.set_defaults(func=cmd_scan)
 
     p_run = sub.add_parser("run", help="Run the continuous scan/trade loop", parents=[common])
@@ -508,6 +525,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--i-understand-the-risk",
         action="store_true",
         help="Required in addition to execution.mode: 'live' in config to actually start live trading",
+    )
+    p_run.add_argument(
+        "--buy-only", action="store_true",
+        help="Only show rows flagged BUY in the printed per-cycle table -- purely a display filter, "
+        "doesn't change which candidates are actually eligible to be traded.",
     )
     p_run.set_defaults(func=cmd_run)
 
