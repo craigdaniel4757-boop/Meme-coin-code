@@ -3,12 +3,13 @@ import type { BuiltPrompt, GeneratedImageResult } from "@/types";
 const ENDPOINT = "https://image.pollinations.ai/prompt";
 const DEFAULT_MODEL = "flux";
 const SIZE = 1024;
-const REQUEST_TIMEOUT_MS = 60_000;
 
-// Pollinations has no published, stable per-minute limit for anonymous
-// requests — historically informal and tight. Shots are generated
-// sequentially with a conservative gap rather than in parallel.
-const CALL_STAGGER_MS = 4000;
+// Serverless hosts (Vercel included) kill the whole request around
+// maxDuration (60s here). Three calls run concurrently rather than
+// sequentially so total wall time is bounded by the slowest single call
+// plus the stagger below, not their sum — comfortably under that ceiling.
+const REQUEST_TIMEOUT_MS = 25_000;
+const CALL_STAGGER_MS = 750;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -55,20 +56,18 @@ async function fetchOneImage(prompt: string): Promise<{ dataUrl?: string; error?
 }
 
 export async function generateWithPollinations(prompts: BuiltPrompt[]): Promise<GeneratedImageResult[]> {
-  const results: GeneratedImageResult[] = [];
+  const settled = await Promise.allSettled(
+    prompts.map((p, i) => sleep(i * CALL_STAGGER_MS).then(() => fetchOneImage(p.prompt)))
+  );
 
-  for (let i = 0; i < prompts.length; i++) {
-    const built = prompts[i]!;
-    if (i > 0) await sleep(CALL_STAGGER_MS);
-
-    const { dataUrl, error } = await fetchOneImage(built.prompt);
-    results.push({
+  return settled.map((result, index) => {
+    const built = prompts[index]!;
+    const outcome = result.status === "fulfilled" ? result.value : { error: "Image generation failed." };
+    return {
       shotId: built.shotId,
       shotLabel: built.label,
       prompt: built.prompt,
-      ...(dataUrl ? { imageDataUrl: dataUrl } : { error: error ?? "Image generation failed." }),
-    });
-  }
-
-  return results;
+      ...(outcome.dataUrl ? { imageDataUrl: outcome.dataUrl } : { error: outcome.error ?? "Image generation failed." }),
+    };
+  });
 }
