@@ -85,7 +85,44 @@ def _trend_score(ind: IndicatorSnapshot) -> tuple[float, list[str]]:
     if ind.vwap is not None:
         notes.append("price above rolling VWAP" if ind.price > ind.vwap else "price below rolling VWAP")
 
-    return alignment_score + slope_score, notes
+    total = alignment_score + slope_score
+
+    # ADX measures trend *strength*, not direction -- it scales confidence
+    # in the EMA stack's own direction above rather than acting as a
+    # direction signal on its own. A strong trend (>=25, the conventional
+    # Wilder threshold) that agrees with a bullish-leaning stack confirms
+    # it; the same strong trend *against* a bullish-leaning stack means a
+    # real trend exists but it's pointing the wrong way for a buy bias,
+    # which is worse than no clear trend at all. A weak/choppy trend
+    # (<15) makes any directional read here less trustworthy regardless
+    # of which way it leans. See bot/analysis/indicators.py's `adx`.
+    if ind.adx is not None:
+        if ind.adx >= 25:
+            if alignment_points >= 2:
+                total = min(100.0, total + 10.0)
+                notes.append(f"ADX {ind.adx:.0f} confirms a real trend")
+            else:
+                total = max(0.0, total - 10.0)
+                notes.append(f"ADX {ind.adx:.0f} trending, but against the EMA stack")
+        elif ind.adx < 15:
+            total = max(0.0, total - 5.0)
+            notes.append(f"ADX {ind.adx:.0f} -- weak/choppy, low trend conviction")
+
+    # Anchored VWAP (since the earliest history this bot has for the pair,
+    # which approximates "since launch") -- a genuinely different
+    # reference than the rolling VWAP noted above, which only remembers
+    # the last vwap_period bars. See bot/analysis/indicators.py's
+    # `anchored_vwap` for why a fixed anchor point is the professional
+    # convention, not a rolling window.
+    if ind.anchored_vwap is not None and ind.price:
+        if ind.price > ind.anchored_vwap:
+            total = min(100.0, total + 5.0)
+            notes.append("price above anchored VWAP (since launch)")
+        else:
+            total = max(0.0, total - 5.0)
+            notes.append("price below anchored VWAP (since launch)")
+
+    return total, notes
 
 
 def _momentum_score(ind: IndicatorSnapshot) -> tuple[float, list[str]]:
@@ -125,6 +162,18 @@ def _momentum_score(ind: IndicatorSnapshot) -> tuple[float, list[str]]:
     elif ind.bullish_divergence:
         total = min(100.0, total + 15.0)
         notes.append("bullish RSI divergence (fresh low on stronger RSI)")
+
+    # OBV divergence is volume-flow-derived, not price-derived like RSI --
+    # genuinely independent confirmation, not a restatement of the RSI
+    # divergence above, so both can fire and compound. Weighted a bit
+    # lighter (10 vs. 15) as the secondary, corroborating signal rather
+    # than the primary one. See bot/analysis/indicators.py's `obv_divergence`.
+    if ind.bearish_obv_divergence:
+        total = max(0.0, total - 10.0)
+        notes.append("bearish OBV divergence (price up, volume flow not confirming)")
+    elif ind.bullish_obv_divergence:
+        total = min(100.0, total + 10.0)
+        notes.append("bullish OBV divergence (price down, volume flow accumulating)")
 
     return total, notes
 

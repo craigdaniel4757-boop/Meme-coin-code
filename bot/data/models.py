@@ -198,8 +198,12 @@ class IndicatorSnapshot:
     swing_low: Optional[float] = None
     ema_fast_slope: Optional[float] = None
     vwap: Optional[float] = None
+    anchored_vwap: Optional[float] = None
+    adx: Optional[float] = None
     bearish_divergence: bool = False
     bullish_divergence: bool = False
+    bearish_obv_divergence: bool = False
+    bullish_obv_divergence: bool = False
     bearish_engulfing: bool = False
     breakout_retest_confirmed: bool = False
     num_candles: int = 0

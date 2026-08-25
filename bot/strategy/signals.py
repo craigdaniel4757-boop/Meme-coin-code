@@ -41,6 +41,7 @@ def momentum_breakout(ctx: StrategyContext) -> Signal | None:
     lookback = p.get("breakout_lookback", 20)
     min_z = p.get("min_volume_zscore", 1.5)
     require_retest = p.get("require_retest", False)
+    min_adx = p.get("min_adx", 0.0)
 
     if ind.swing_high is None or ind.volume_zscore is None:
         return None
@@ -56,6 +57,15 @@ def momentum_breakout(ctx: StrategyContext) -> Signal | None:
     # default (preserves "buy the initial break"); fewer signals when on,
     # since a straight-line breakout that never looks back won't qualify.
     if require_retest and not ind.breakout_retest_confirmed:
+        return None
+    # Optional trend-strength gate: ADX measures how strong the current
+    # trend is, independent of direction (bot/analysis/indicators.py).
+    # Off by default (min_adx=0.0 always passes). Fails *open*, not
+    # closed, when ADX isn't computable yet (too little history) -- the
+    # same asymmetry higher-timeframe confirmation uses: this is a trade-
+    # quality filter, not a safety gate, so "can't confirm yet" shouldn't
+    # block a young coin's first real signal.
+    if min_adx > 0 and ind.adx is not None and ind.adx < min_adx:
         return None
 
     breakout_strength_pct = (ind.price / ind.swing_high - 1) * 100

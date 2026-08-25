@@ -136,8 +136,12 @@ def test_vectorized_series_matches_recompute_on_truncated_window():
         assert fast.swing_high == pytest.approx(slow.swing_high, rel=1e-9, abs=1e-9)
         assert fast.vwap == pytest.approx(slow.vwap, rel=1e-9, abs=1e-9)
         assert fast.bb_bandwidth_min_recent == pytest.approx(slow.bb_bandwidth_min_recent, rel=1e-9, abs=1e-9)
+        assert fast.adx == pytest.approx(slow.adx, rel=1e-9, abs=1e-9)
+        assert fast.anchored_vwap == pytest.approx(slow.anchored_vwap, rel=1e-9, abs=1e-9)
         assert fast.bearish_divergence == slow.bearish_divergence
         assert fast.bullish_divergence == slow.bullish_divergence
+        assert fast.bearish_obv_divergence == slow.bearish_obv_divergence
+        assert fast.bullish_obv_divergence == slow.bullish_obv_divergence
         assert fast.bearish_engulfing == slow.bearish_engulfing
         assert fast.breakout_retest_confirmed == slow.breakout_retest_confirmed
 
@@ -280,3 +284,99 @@ def test_breakout_retest_confirmed_false_when_not_yet_reclaimed():
     result = ind.breakout_retest_confirmed(close, low, swing_high, retest_lookback=5, retest_tolerance_pct=3.0)
 
     assert bool(result.iloc[9]) is False
+
+
+# -- adx ---------------------------------------------------------------------
+
+
+def test_adx_reads_high_on_a_strong_sustained_trend():
+    rng = np.random.default_rng(1)
+    n = 100
+    close = 1.0 * np.cumprod(1 + 0.02 + rng.normal(0, 0.003, n))
+    high = close * 1.005
+    low = close * 0.995
+    result = ind.adx(pd.Series(high), pd.Series(low), pd.Series(close), period=14)
+    assert result.iloc[-1] > 25  # conventional "genuinely trending" threshold
+
+
+def test_adx_reads_low_on_a_choppy_sideways_series():
+    rng = np.random.default_rng(1)
+    n = 100
+    close = 1.0 + 0.02 * np.sin(np.arange(n) * 0.9) + rng.normal(0, 0.002, n)
+    high = close + 0.01
+    low = close - 0.01
+    result = ind.adx(pd.Series(high), pd.Series(low), pd.Series(close), period=14)
+    assert result.iloc[-1] < 15  # conventional "no trend" threshold
+
+
+def test_adx_stays_within_0_100():
+    df = make_ohlcv(n=150, seed=7)
+    result = ind.adx(df["high"], df["low"], df["close"], period=14)
+    assert result.dropna().between(0, 100).all()
+
+
+# -- anchored_vwap -------------------------------------------------------------
+
+
+def test_anchored_vwap_matches_hand_computed_value():
+    df = pd.DataFrame({
+        "high":   [1.0, 1.2, 1.1],
+        "low":    [0.8, 1.0, 0.9],
+        "close":  [0.9, 1.1, 1.0],
+        "volume": [100.0, 200.0, 50.0],
+    })
+    result = ind.anchored_vwap(df)
+    typical = (df["high"] + df["low"] + df["close"]) / 3
+    expected = (typical * df["volume"]).cumsum() / df["volume"].cumsum()
+    pd.testing.assert_series_equal(result, expected, check_names=False)
+
+
+def test_anchored_vwap_differs_from_rolling_vwap_once_window_forgets_old_bars():
+    """The whole point of anchoring instead of a rolling window: once more
+    than `vwap_period` bars have passed, a big early move should still
+    influence the anchored reading but drop out of the rolling one."""
+    df = make_ohlcv(n=60, start_price=1.0, drift=0.01, volatility=0.005, seed=3)
+    anchored = ind.anchored_vwap(df)
+    rolling = ind.rolling_vwap(df, period=20)
+    assert anchored.iloc[-1] != pytest.approx(rolling.iloc[-1])
+
+
+# -- on_balance_volume ----------------------------------------------------------
+
+
+def test_on_balance_volume_matches_hand_computed_sequence():
+    close = pd.Series([1.0, 1.1, 1.05, 1.05, 1.2])
+    volume = pd.Series([10.0, 20.0, 15.0, 5.0, 30.0])
+    result = ind.on_balance_volume(close, volume)
+    # bar0: no prior -> 0; up +20 -> 20; down -15 -> 5; flat -> 5; up +30 -> 35
+    assert result.tolist() == pytest.approx([0.0, 20.0, 5.0, 5.0, 35.0])
+
+
+# -- obv_divergence --------------------------------------------------------------
+
+
+def test_obv_divergence_bearish_when_price_makes_fresh_high_on_falling_obv():
+    close = pd.Series([1.00, 1.01, 0.99, 1.02, 0.98, 1.03])
+    volume = pd.Series([5.0, 5.0, 50.0, 5.0, 50.0, 5.0])
+    obv = ind.on_balance_volume(close, volume)
+    bearish, bullish = ind.obv_divergence(close, obv, lookback=5)
+    assert bool(bearish.iloc[-1]) is True
+    assert bool(bullish.iloc[-1]) is False
+
+
+def test_obv_divergence_bullish_when_price_makes_fresh_low_on_rising_obv():
+    close = pd.Series([1.00, 0.99, 1.01, 0.98, 1.02, 0.97])
+    volume = pd.Series([5.0, 5.0, 50.0, 5.0, 50.0, 5.0])
+    obv = ind.on_balance_volume(close, volume)
+    bearish, bullish = ind.obv_divergence(close, obv, lookback=5)
+    assert bool(bullish.iloc[-1]) is True
+    assert bool(bearish.iloc[-1]) is False
+
+
+def test_obv_divergence_false_when_price_and_obv_confirm_each_other():
+    close = pd.Series([1.00, 1.01, 1.02, 1.03, 1.04, 1.05])
+    volume = pd.Series([10.0] * 6)
+    obv = ind.on_balance_volume(close, volume)
+    bearish, bullish = ind.obv_divergence(close, obv, lookback=5)
+    assert bool(bearish.iloc[-1]) is False
+    assert bool(bullish.iloc[-1]) is False

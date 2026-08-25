@@ -115,6 +115,7 @@ class IndicatorsYamlConfig(BaseModel):
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     atr_period: int = 14
+    adx_period: int = 14
     volume_zscore_period: int = 20
     swing_lookback: int = 20
     retest_lookback: int = 10
@@ -246,6 +247,7 @@ def build_indicator_params(cfg: AppConfig) -> IndicatorParams:
         bollinger_period=ic.bollinger_period,
         bollinger_std=ic.bollinger_std,
         atr_period=ic.atr_period,
+        adx_period=ic.adx_period,
         volume_zscore_period=ic.volume_zscore_period,
         swing_lookback=ic.swing_lookback,
         retest_lookback=ic.retest_lookback,

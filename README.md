@@ -166,11 +166,12 @@ bot/data/        DexScreener + GeckoTerminal clients, Solana on-chain checks
                   (mint/freeze authority, holder concentration), Jupiter
                   sellability probe, local candle store, rate limiting,
                   typed models
-bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/VWAP/swings,
-                  RSI divergence, bearish engulfing, breakout retest
-                  confirmation), composite scoring model, hard safety
-                  filters, liquidity-crash detector, multi-timeframe
-                  confirmation, market-regime filter
+bot/analysis/     Indicators (RSI/MACD/EMA/Bollinger/ATR/ADX/VWAP/anchored
+                  VWAP/swings, RSI divergence, OBV divergence, bearish
+                  engulfing, breakout retest confirmation), composite
+                  scoring model, hard safety filters, liquidity-crash
+                  detector, multi-timeframe confirmation, market-regime
+                  filter
 bot/strategy/     Signal-generating strategies + the risk manager
                   (sizing, stop-loss, take-profit ladder, trailing stop,
                   reversal-pattern exit, same-token cooldown, circuit

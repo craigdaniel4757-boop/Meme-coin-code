@@ -91,6 +91,43 @@ def test_momentum_breakout_require_retest_fires_on_confirmed_retest():
     assert signal.strategy_name == "momentum_breakout"
 
 
+def test_momentum_breakout_min_adx_off_by_default_ignores_adx():
+    # min_adx defaults to 0.0 -- a weak/choppy ADX reading must not block
+    # a breakout when the gate hasn't been opted into.
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02, adx=5.0, num_candles=150,
+    )
+    assert momentum_breakout(_ctx(ind)) is not None
+
+
+def test_momentum_breakout_min_adx_blocks_when_adx_below_threshold():
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02, adx=10.0, num_candles=150,
+    )
+    params = {"momentum_breakout": {"min_adx": 25.0}}
+    assert momentum_breakout(_ctx(ind, params=params)) is None
+
+
+def test_momentum_breakout_min_adx_fires_when_adx_meets_threshold():
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02, adx=30.0, num_candles=150,
+    )
+    params = {"momentum_breakout": {"min_adx": 25.0}}
+    signal = momentum_breakout(_ctx(ind, params=params))
+    assert signal is not None
+    assert signal.strategy_name == "momentum_breakout"
+
+
+def test_momentum_breakout_min_adx_fails_open_when_adx_not_yet_computable():
+    # Too little history for ADX yet (None) -- a trade-quality filter, not
+    # a safety gate, so this must not block a young coin's first signal.
+    ind = IndicatorSnapshot(
+        price=1.15, swing_high=1.05, volume_zscore=2.2, macd_hist=0.02, adx=None, num_candles=150,
+    )
+    params = {"momentum_breakout": {"min_adx": 25.0}}
+    assert momentum_breakout(_ctx(ind, params=params)) is not None
+
+
 def test_momentum_breakout_end_to_end_on_synthetic_breakout():
     df = make_breakout_df().iloc[:104].reset_index(drop=True)  # base range + first few breakout bars
     from bot.analysis.indicators import IndicatorParams, compute_indicator_snapshot

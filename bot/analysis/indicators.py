@@ -37,6 +37,7 @@ class IndicatorParams:
     bollinger_period: int = 20
     bollinger_std: float = 2.0
     atr_period: int = 14
+    adx_period: int = 14
     volume_zscore_period: int = 20
     swing_lookback: int = 20
     vwap_period: int = 20
@@ -90,12 +91,48 @@ def bollinger_bands(
     return upper, mid, lower
 
 
-def atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+def _true_range(high: pd.Series, low: pd.Series, close: pd.Series) -> pd.Series:
     prev_close = close.shift(1)
-    true_range = pd.concat(
+    return pd.concat(
         [high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1
     ).max(axis=1)
-    return true_range.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+
+def atr(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    return _true_range(high, low, close).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+
+def adx(high: pd.Series, low: pd.Series, close: pd.Series, period: int = 14) -> pd.Series:
+    """Average Directional Index (Wilder): trend *strength*, independent of
+    direction. Conventionally >=25 means "genuinely trending" -- worth
+    trusting a directional read (the EMA stack, a breakout) on -- and <15
+    means choppy/no trend, where the same directional signals are much
+    more likely to be noise. Unlike everything else in this file, ADX
+    doesn't supply a direction itself; see how it's used in
+    bot/analysis/scoring.py's `_trend_score`, where it scales confidence
+    in the EMA stack's own direction rather than acting as one on its own.
+
+    Standard +DM/-DM/true-range construction, using the same Wilder
+    smoothing (`.ewm(alpha=1/period, ...)`) as `rsi`/`atr` above.
+    """
+    prev_high = high.shift(1)
+    prev_low = low.shift(1)
+    up_move = high - prev_high
+    down_move = prev_low - low
+
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=high.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=high.index)
+
+    smoothed_tr = _true_range(high, low, close).ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    smoothed_plus_dm = plus_dm.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+    smoothed_minus_dm = minus_dm.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
+
+    plus_di = 100 * smoothed_plus_dm / smoothed_tr.replace(0, np.nan)
+    minus_di = 100 * smoothed_minus_dm / smoothed_tr.replace(0, np.nan)
+
+    di_sum = (plus_di + minus_di).replace(0, np.nan)
+    dx = 100 * (plus_di - minus_di).abs() / di_sum
+    return dx.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
 
 
 def zscore(series: pd.Series, period: int = 20) -> pd.Series:
@@ -232,6 +269,66 @@ def rolling_vwap(df: pd.DataFrame, period: int = 20) -> pd.Series:
     return pv.rolling(period).sum() / df["volume"].rolling(period).sum().replace(0, np.nan)
 
 
+def anchored_vwap(df: pd.DataFrame) -> pd.Series:
+    """VWAP anchored to the start of the available series (bar 0) rather
+    than a rolling window -- for a meme coin, the earliest candle history
+    this bot has approximates "since launch" once a pool has enough
+    history behind it to be worth trusting at all. Professional VWAP
+    anchoring is always to a meaningful fixed point (a session open, a
+    launch, a swing extreme), never a rolling window: `rolling_vwap`
+    above forgets old bars and answers "fair value over the last N bars,"
+    while this compounds forward from the anchor and answers "fair value
+    since this thing started trading" -- a genuinely different reference
+    level, not just a longer-period version of the same thing.
+    """
+    typical_price = (df["high"] + df["low"] + df["close"]) / 3
+    cum_pv = (typical_price * df["volume"]).cumsum()
+    cum_vol = df["volume"].cumsum()
+    return cum_pv / cum_vol.replace(0, np.nan)
+
+
+def on_balance_volume(close: pd.Series, volume: pd.Series) -> pd.Series:
+    """Cumulative volume flow: adds a bar's volume when it closed up,
+    subtracts it when it closed down, unchanged on a flat close. Unlike
+    RSI, this is derived from volume, not price -- so an OBV/price
+    divergence (`obv_divergence` below) is genuinely independent
+    information from RSI divergence, not a restatement of it."""
+    direction = np.sign(close.diff()).fillna(0)
+    return (direction * volume).cumsum()
+
+
+def obv_divergence(close: pd.Series, obv_series: pd.Series, lookback: int = 20) -> tuple[pd.Series, pd.Series]:
+    """Bearish/bullish OBV divergence, as boolean series -- the same
+    simplified, fully vectorizable technique as `rsi_divergence` above
+    (current bar vs. the bar `lookback` bars back, gated on a fresh
+    extreme over that window), substituting cumulative volume flow for
+    the RSI oscillator. See `rsi_divergence`'s docstring for what this
+    approximates and why.
+
+    One real difference from `rsi_divergence`: RSI is bounded (0-100), so
+    that function additionally gates on RSI being in a bullish/bearish
+    *zone* (>55 / <45). OBV is unbounded and cumulative -- there's no
+    equivalent "zone" to gate on -- so this relies only on the fresh-
+    extreme-plus-non-confirmation condition.
+
+    Bearish: price makes a higher high than `lookback` bars ago while OBV
+    reads *lower* than it did then -- price rising without volume flow
+    actually confirming it (distribution under a rising price). Bullish:
+    the mirror image (fresh low, OBV higher than then -- accumulation
+    under a falling price).
+    """
+    price_prior = close.shift(lookback)
+    obv_prior = obv_series.shift(lookback)
+    rolling_high = close.rolling(lookback).max()
+    rolling_low = close.rolling(lookback).min()
+    near_high = close >= rolling_high * 0.999
+    near_low = close <= rolling_low * 1.001
+
+    bearish = near_high & (close > price_prior) & (obv_series < obv_prior)
+    bullish = near_low & (close < price_prior) & (obv_series > obv_prior)
+    return bearish.fillna(False), bullish.fillna(False)
+
+
 def compute_indicator_series(df: pd.DataFrame, params: IndicatorParams) -> pd.DataFrame:
     """Vectorized indicator computation over the *entire* series at once.
 
@@ -280,11 +377,17 @@ def compute_indicator_series(df: pd.DataFrame, params: IndicatorParams) -> pd.Da
     out["swing_low"] = rolling_swing_low(df, params.swing_lookback)
     out["ema_fast_slope"] = slope_pct(ema_f, lookback=5)
     out["vwap"] = rolling_vwap(df, params.vwap_period)
+    out["anchored_vwap"] = anchored_vwap(df)
+    out["adx"] = adx(high, low, close, params.adx_period)
 
     rsi_s = out["rsi"]
     bearish_div, bullish_div = rsi_divergence(close, rsi_s, params.swing_lookback)
     out["bearish_divergence"] = bearish_div
     out["bullish_divergence"] = bullish_div
+    obv_s = on_balance_volume(close, volume)
+    bearish_obv_div, bullish_obv_div = obv_divergence(close, obv_s, params.swing_lookback)
+    out["bearish_obv_divergence"] = bearish_obv_div
+    out["bullish_obv_divergence"] = bullish_obv_div
     out["bearish_engulfing"] = bearish_engulfing(df)
     out["breakout_retest_confirmed"] = breakout_retest_confirmed(
         close, low, out["swing_high"], params.retest_lookback, params.retest_tolerance_pct
@@ -327,8 +430,12 @@ def snapshot_from_series_row(series_df: pd.DataFrame, i: int) -> IndicatorSnapsh
         swing_low=val("swing_low"),
         ema_fast_slope=val("ema_fast_slope"),
         vwap=val("vwap"),
+        anchored_vwap=val("anchored_vwap"),
+        adx=val("adx"),
         bearish_divergence=bool_val("bearish_divergence"),
         bullish_divergence=bool_val("bullish_divergence"),
+        bearish_obv_divergence=bool_val("bearish_obv_divergence"),
+        bullish_obv_divergence=bool_val("bullish_obv_divergence"),
         bearish_engulfing=bool_val("bearish_engulfing"),
         breakout_retest_confirmed=bool_val("breakout_retest_confirmed"),
         num_candles=int(row["num_candles"]),

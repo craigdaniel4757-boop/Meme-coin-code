@@ -124,6 +124,7 @@ indicators:
   bollinger_period: 20
   bollinger_std: 2.0
   atr_period: 14
+  adx_period: 14
   volume_zscore_period: 20
   swing_lookback: 20
   retest_lookback: 10         # how far back momentum_breakout's optional require_retest mode looks
@@ -150,6 +151,10 @@ strategy:
     # have pulled back near the broken level and reclaimed it before
     # entering -- fewer, more validated signals. See docs/STRATEGY.md.
     require_retest: false
+    # Off by default (0.0 always passes). Set to e.g. 20-25 to also
+    # require ADX to confirm a genuinely strong trend (not just a
+    # directional read) before entering -- see docs/STRATEGY.md.
+    min_adx: 0.0
   volume_spike_breakout:
     min_volume_zscore: 2.5
     max_rsi: 85

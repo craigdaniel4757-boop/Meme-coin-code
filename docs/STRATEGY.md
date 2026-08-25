@@ -42,8 +42,8 @@ explainable (`ScoreBreakdown.notes`):
 
 | Factor | Default weight | What it measures |
 |---|---|---|
-| Trend | 25% | EMA(9/21/50) stack alignment + EMA9 slope (rolling VWAP position noted, not scored) |
-| Momentum | 20% | RSI zone + MACD histogram level/direction + RSI/price divergence |
+| Trend | 25% | EMA(9/21/50) stack alignment + EMA9 slope + ADX trend-strength confirmation + anchored-VWAP position (rolling VWAP position noted, not scored) |
+| Momentum | 20% | RSI zone + MACD histogram level/direction + RSI/price divergence + OBV/price divergence |
 | Volume | 20% | Volume z-score spike + buy/sell pressure + volume/liquidity health (incl. an average-trade-size wash-trading check) |
 | Volatility | 10% | ATR% of price — too low is dead, too high is unmanageable |
 | Liquidity/safety | 15% | Liquidity depth, FDV/liquidity ratio, pair age, safety-gate pass rate, holder concentration (Solana) |
@@ -70,6 +70,42 @@ rather than running a true peak-finding pass across multiple intermediate
 swings, which is a reasonable trade of some precision for something that
 computes over an entire series in one pass instead of needing bar-by-bar
 peak detection.
+
+The momentum factor also checks **OBV (On-Balance Volume) divergence**
+(`bot/analysis/indicators.py`'s `obv_divergence`) — the same simplified
+technique as RSI divergence, substituting cumulative volume flow for the
+RSI oscillator. OBV is derived from volume, not price, so an OBV/price
+divergence is genuinely independent confirmation, not a restatement of
+the RSI one: price grinding to a fresh high while OBV nets *lower* over
+the same span means the move isn't backed by real accumulation
+(distribution under a rising price), and the two can and do compound when
+they agree. Weighted lighter than RSI divergence (10 points vs. 15) as
+the secondary, corroborating signal. One real difference from RSI
+divergence: RSI is bounded (0-100) so that check also gates on a
+bullish/bearish *zone*; OBV is unbounded and cumulative, so there's no
+zone equivalent to gate on.
+
+The trend factor also checks **ADX** (`bot/analysis/indicators.py`'s
+`adx`, standard Wilder construction) and **anchored VWAP**
+(`anchored_vwap`). ADX measures trend *strength*, not direction — it
+doesn't supply a directional read on its own, it scales confidence in the
+EMA stack's own direction: a strong trend (ADX ≥ 25, the conventional
+threshold) that agrees with a bullish-leaning stack confirms it (+10); the
+same strong trend *against* a bullish-leaning stack means a real trend
+exists but it's pointing the wrong way for a buy bias, which is worse
+than no clear trend at all (-10); a weak/choppy trend (ADX < 15) makes
+any directional read less trustworthy regardless of which way it leans
+(-5). Anchored VWAP is volume-weighted average price computed from the
+*start* of the available candle history (approximating "since launch" for
+a meme coin) rather than a rolling window — the professional convention
+for VWAP anchoring is always a meaningful fixed point (a launch, a session
+open, a swing extreme), never a rolling window, which is what the existing
+*rolling* VWAP already computes and is a genuinely different reference
+level, not just a longer-period version of the same thing. Price above it
+is a modest bullish tilt (+5), below is a modest bearish tilt (-5). Both
+fail open (no adjustment at all) when the reading isn't computable yet —
+same "too little history isn't a penalty" treatment as everything else in
+this section.
 
 Why these weights: trend and momentum dominate because they're the most
 directly predictive of near-term continuation, which is what the
@@ -189,7 +225,13 @@ highest false-positive rate of the group on its own.
   Like the divergence detector in §2, this is a simplified, fully
   vectorizable approximation of a textbook retest: it checks for *any*
   pullback within a shorter recent sub-window after the breakout, not a
-  precise single swing low.
+  precise single swing low. Also optional: `min_adx` (off by default at
+  0.0, config: `strategy.momentum_breakout.min_adx`) additionally requires
+  ADX (§2) to confirm the breakout is happening inside a genuinely strong
+  trend, not just noise — set it to roughly 20-25 to opt in. Fails *open*
+  when ADX isn't computable yet (too little history), the same asymmetry
+  as higher-timeframe confirmation below: this is a trade-quality filter,
+  not a safety gate.
 - **`volume_spike_breakout`** — a more sensitive, volume-first trigger:
   fires on a sharp volume z-score spike plus a positive 5-minute price
   move, before a clean range breakout has necessarily formed. Catches
@@ -350,12 +392,12 @@ that:
   fetching a genuinely independent higher-timeframe series the way live
   scanning does -- a reasonable stand-in, not an exact match for what a
   real 1h candle from the exchange would have looked like at that moment.
-- **Identical, not approximated**: RSI/price divergence, the bearish
-  engulfing pattern, the Bollinger squeeze breakout strategy, breakout
-  retest confirmation, and the reversal-pattern exit (§2, §4, §5) are all
-  pure functions of the OHLCV window itself, computed by the exact same
-  indicator code live scanning uses -- nothing about them changes or
-  needs approximating in a backtest.
+- **Identical, not approximated**: RSI/price divergence, OBV divergence,
+  ADX, anchored VWAP, the bearish engulfing pattern, the Bollinger squeeze
+  breakout strategy, breakout retest confirmation, and the reversal-
+  pattern exit (§2, §4, §5) are all pure functions of the OHLCV window
+  itself, computed by the exact same indicator code live scanning uses --
+  nothing about them changes or needs approximating in a backtest.
 - **Also identical, different mechanism**: the same-token cooldown (§4)
   needs no external data either, so a backtest applies it exactly the way
   live scanning does -- track the timestamp of the last stop-loss/

@@ -197,3 +197,142 @@ def test_bullish_divergence_raises_momentum_score():
 
     assert diverging.momentum > plain.momentum
     assert any("bullish RSI divergence" in note for note in diverging.notes)
+
+
+def test_bearish_obv_divergence_lowers_momentum_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _bullish_indicators(), safety, ScoringWeights())
+    diverging = compute_score(
+        pair, dataclasses.replace(_bullish_indicators(), bearish_obv_divergence=True), safety, ScoringWeights()
+    )
+
+    assert diverging.momentum < plain.momentum
+    assert any("bearish OBV divergence" in note for note in diverging.notes)
+
+
+def test_bullish_obv_divergence_raises_momentum_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _bearish_indicators(), safety, ScoringWeights())
+    diverging = compute_score(
+        pair, dataclasses.replace(_bearish_indicators(), bullish_obv_divergence=True), safety, ScoringWeights()
+    )
+
+    assert diverging.momentum > plain.momentum
+    assert any("bullish OBV divergence" in note for note in diverging.notes)
+
+
+def test_rsi_and_obv_divergence_compound_rather_than_override():
+    """Both are independent signals (price-derived vs. volume-flow-derived,
+    see bot/analysis/indicators.py) -- when they agree, both should count,
+    not just whichever the code happens to check first."""
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    only_rsi = compute_score(
+        pair, dataclasses.replace(_bullish_indicators(), bearish_divergence=True), safety, ScoringWeights()
+    )
+    both = compute_score(
+        pair,
+        dataclasses.replace(_bullish_indicators(), bearish_divergence=True, bearish_obv_divergence=True),
+        safety, ScoringWeights(),
+    )
+    assert both.momentum < only_rsi.momentum
+
+
+# -- ADX ---------------------------------------------------------------------
+
+
+def _moderate_uptrend_indicators(**overrides) -> IndicatorSnapshot:
+    """alignment_points == 2 (price > fast > mid, but mid < slow) with a
+    flat slope -- deliberately mid-range trend score (60, not near 0 or
+    100) so ADX adjustments below are checked without floor/ceiling
+    clamping masking whether the adjustment actually applied."""
+    base = dict(price=1.1, ema_fast=1.05, ema_mid=1.0, ema_slow=1.02, ema_fast_slope=0.0, num_candles=150)
+    base.update(overrides)
+    return IndicatorSnapshot(**base)
+
+
+def _moderate_downtrend_indicators(**overrides) -> IndicatorSnapshot:
+    """alignment_points == 1 -- a bullish-leaning EMA stack, but not
+    aligned enough to count as "confirmed" by the ADX logic in
+    bot/analysis/scoring.py's _trend_score."""
+    base = dict(price=1.1, ema_fast=1.0, ema_mid=1.05, ema_slow=1.1, ema_fast_slope=0.0, num_candles=150)
+    base.update(overrides)
+    return IndicatorSnapshot(**base)
+
+
+def test_high_adx_confirming_the_ema_stack_raises_trend_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _moderate_uptrend_indicators(), safety, ScoringWeights())
+    confirmed = compute_score(
+        pair, _moderate_uptrend_indicators(adx=30.0), safety, ScoringWeights()
+    )
+    assert confirmed.trend > plain.trend
+    assert any("confirms a real trend" in note for note in confirmed.notes)
+
+
+def test_high_adx_against_a_weakly_aligned_stack_lowers_trend_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _moderate_downtrend_indicators(), safety, ScoringWeights())
+    against = compute_score(
+        pair, _moderate_downtrend_indicators(adx=30.0), safety, ScoringWeights()
+    )
+    assert against.trend < plain.trend
+    assert any("trending, but against the EMA stack" in note for note in against.notes)
+
+
+def test_low_adx_choppy_market_lowers_trend_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _moderate_uptrend_indicators(), safety, ScoringWeights())
+    choppy = compute_score(pair, _moderate_uptrend_indicators(adx=8.0), safety, ScoringWeights())
+    assert choppy.trend < plain.trend
+    assert any("weak/choppy" in note for note in choppy.notes)
+
+
+def test_mid_range_adx_is_ambiguous_and_does_not_adjust_trend_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _moderate_uptrend_indicators(), safety, ScoringWeights())
+    ambiguous = compute_score(pair, _moderate_uptrend_indicators(adx=20.0), safety, ScoringWeights())
+    assert ambiguous.trend == plain.trend
+
+
+def test_missing_adx_does_not_adjust_trend_score():
+    """A pair too new for ADX to have computed yet (None) must fail open --
+    same asymmetry as higher-timeframe confirmation, not a safety gate."""
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _moderate_uptrend_indicators(), safety, ScoringWeights())
+    missing = compute_score(pair, _moderate_uptrend_indicators(adx=None), safety, ScoringWeights())
+    assert missing.trend == plain.trend
+
+
+# -- anchored VWAP ------------------------------------------------------------
+
+
+def test_price_above_anchored_vwap_raises_trend_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _bullish_indicators(), safety, ScoringWeights())
+    above = compute_score(
+        pair, dataclasses.replace(_bullish_indicators(), anchored_vwap=_bullish_indicators().price - 0.5),
+        safety, ScoringWeights(),
+    )
+    assert above.trend > plain.trend
+    assert any("above anchored VWAP" in note for note in above.notes)
+
+
+def test_price_below_anchored_vwap_lowers_trend_score():
+    pair = make_pair()
+    safety = _neutral_safety(pair)
+    plain = compute_score(pair, _bullish_indicators(), safety, ScoringWeights())
+    below = compute_score(
+        pair, dataclasses.replace(_bullish_indicators(), anchored_vwap=_bullish_indicators().price + 0.5),
+        safety, ScoringWeights(),
+    )
+    assert below.trend < plain.trend
+    assert any("below anchored VWAP" in note for note in below.notes)
