@@ -28,7 +28,15 @@ function describeMissingImage(reason: FinishReason | undefined): string {
 function errorMessageFrom(reason: unknown): string {
   if (reason instanceof ApiError) {
     if (reason.status === 429) {
-      return "Hit Gemini's free-tier rate limit. Wait a minute and try again.";
+      // A RESOURCE_EXHAUSTED response quoting a free-tier quota of 0 means
+      // the project behind this key has no free image-generation
+      // allowance at all — as of late 2025 that requires linking Cloud
+      // Billing (still pay-as-you-go, no minimum spend), not a transient
+      // per-minute limit that a short wait fixes.
+      if (reason.message.includes("free_tier") && reason.message.includes("limit: 0")) {
+        return "Gemini rejected this: your API key's project has zero free image-generation quota. Since late 2025 that model needs Cloud Billing linked to the project (pay-as-you-go, no minimum spend) — see https://ai.google.dev/gemini-api/docs/rate-limits, or switch IMAGE_PROVIDER to \"pollinations\" or \"openai\".";
+      }
+      return "Hit Gemini's rate limit. Wait a minute and try again.";
     }
     return reason.message;
   }

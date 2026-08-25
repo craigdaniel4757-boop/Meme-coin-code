@@ -1,17 +1,24 @@
 import type { BuiltPrompt, GeneratedImageResult } from "@/types";
 import { generateWithGemini } from "./gemini";
 import { generateWithOpenAI } from "./openai";
+import { generateWithPollinations } from "./pollinations";
 
-export type ImageProviderId = "gemini" | "openai";
+export type ImageProviderId = "pollinations" | "gemini" | "openai";
 
 export interface ImageProvider {
   id: ImageProviderId;
   label: string;
-  apiKeyEnvVar: string;
+  /** Env var holding the API key. Omit for providers that need no key. */
+  apiKeyEnvVar?: string;
   generate: (prompts: BuiltPrompt[]) => Promise<GeneratedImageResult[]>;
 }
 
 const PROVIDERS: Record<ImageProviderId, ImageProvider> = {
+  pollinations: {
+    id: "pollinations",
+    label: "Pollinations.ai",
+    generate: generateWithPollinations,
+  },
   gemini: {
     id: "gemini",
     label: "Google Gemini",
@@ -26,8 +33,13 @@ const PROVIDERS: Record<ImageProviderId, ImageProvider> = {
   },
 };
 
-/** Defaults to Gemini: it has a genuinely free tier, unlike gpt-image-1. */
+/**
+ * Defaults to Pollinations: it's the only option that needs no API key and
+ * no billing account at all. Gemini's free tier requires Cloud Billing to
+ * be linked as of late 2025 (still pay-as-you-go, no minimum spend), and
+ * gpt-image-1 has never had a free tier.
+ */
 export function getActiveProvider(): ImageProvider {
-  const requested = (process.env.IMAGE_PROVIDER || "gemini").trim().toLowerCase();
-  return PROVIDERS[requested as ImageProviderId] ?? PROVIDERS.gemini;
+  const requested = (process.env.IMAGE_PROVIDER || "pollinations").trim().toLowerCase();
+  return PROVIDERS[requested as ImageProviderId] ?? PROVIDERS.pollinations;
 }

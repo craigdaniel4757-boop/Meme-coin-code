@@ -28,31 +28,38 @@ or reproducing existing characters, only the visual grammar of the game.
 Requires Node.js 18.18+. Image generation is provider-based, selected via
 `IMAGE_PROVIDER` in your env file:
 
-- **`gemini`** (default) — Google's `gemini-2.5-flash-image` ("Nano Banana").
-  Get a free key at [Google AI Studio](https://aistudio.google.com/apikey) —
-  no credit card required. Free tier allows up to 500 images/day; the app
-  paces its 3 calls per generation with a short delay between them to stay
-  under the free tier's per-minute rate limit.
-- **`openai`** — `gpt-image-1`, paid only (no free tier). Get a key at
+- **`pollinations`** (default) — [Pollinations.ai](https://pollinations.ai),
+  genuinely free and unauthenticated, zero setup. Trade-off: lower and less
+  consistent quality, an informal/unpublished rate limit, no uptime
+  guarantee. Good for trying the app out with no signup at all.
+- **`gemini`** — Google's `gemini-2.5-flash-image` ("Nano Banana"). Get a key
+  at [Google AI Studio](https://aistudio.google.com/apikey). **Not actually
+  free to use**: as of late 2025 Google gates image-generation models behind
+  Cloud Billing being linked to the key's project (still pay-as-you-go, no
+  minimum spend — but not the no-billing free tier the model card implies).
+  Without billing linked you'll get a 429 explaining exactly that.
+- **`openai`** — `gpt-image-1`, paid only, no free tier at all. Get a key at
   [OpenAI's platform](https://platform.openai.com/api-keys).
 
 ```bash
 cd boss-forge
 npm install
-cp .env.example .env.local   # add GEMINI_API_KEY (or switch to openai)
+cp .env.example .env.local   # pollinations needs no edits; add a key to switch provider
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
 
-Without the active provider's API key set, game selection and the form still
-work, but generating will return a clear setup message instead of images.
+Without the active provider's API key set (when one is required), game
+selection and the form still work, but generating will return a clear setup
+message instead of images.
 
 ### Optional environment variables
 
 See [`.env.example`](.env.example):
 
-- `IMAGE_PROVIDER` — `gemini` (default) or `openai`.
+- `IMAGE_PROVIDER` — `pollinations` (default), `gemini`, or `openai`.
+- `POLLINATIONS_MODEL` — defaults to `flux`.
 - `GEMINI_MODEL` — defaults to `gemini-2.5-flash-image`.
 - `IMAGE_MODEL` — OpenAI model, defaults to `gpt-image-1`.
 - `IMAGE_SIZE` — OpenAI only. One of `1024x1024` (default), `1024x1536`, `1536x1024`, `auto`.
@@ -73,21 +80,24 @@ src/
   lib/
     games.ts                 Game metadata: tagline, style tags, example prompts
     promptEngine.ts           The style guides + 3-shot prompt builder
-    providers/                One module per image backend (gemini.ts, openai.ts) behind
-                               a common generate(prompts) -> GeneratedImageResult[] contract,
+    providers/                One module per image backend (pollinations.ts, gemini.ts,
+                               openai.ts) behind a common
+                               generate(prompts) -> GeneratedImageResult[] contract,
                                selected by index.ts via IMAGE_PROVIDER
   types/                      Shared TypeScript types
 ```
 
 ## Notes on cost and abuse protection
 
-Gemini's free tier covers normal personal use, but it's a daily quota, not
-unlimited access — heavy or public use can still exhaust it. Switching to
-`IMAGE_PROVIDER=openai` charges per image with no free tier at all. Either
-way, the API route includes a lightweight in-memory rate limit (5
-generations/minute per IP) as a safety net against runaway usage — it's
-best-effort and resets on redeploy/restart, so add real auth/rate limiting
-before exposing this publicly at scale.
+Pollinations is free but is a shared, best-effort community service — no
+uptime or quality guarantee, and its informal rate limit can bite under
+heavy use. Gemini requires Cloud Billing linked to get any image-generation
+quota at all (pay-as-you-go, no minimum spend). `IMAGE_PROVIDER=openai`
+charges per image with no free tier at all. Regardless of provider, the API
+route includes a lightweight in-memory rate limit (5 generations/minute per
+IP) as a safety net against runaway usage — it's best-effort and resets on
+redeploy/restart, so add real auth/rate limiting before exposing this
+publicly at scale.
 
 ## Fan project disclaimer
 

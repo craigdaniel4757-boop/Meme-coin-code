@@ -67,8 +67,7 @@ export async function POST(req: NextRequest) {
   }
 
   const provider = getActiveProvider();
-  const apiKey = process.env[provider.apiKeyEnvVar];
-  if (!apiKey) {
+  if (provider.apiKeyEnvVar && !process.env[provider.apiKeyEnvVar]) {
     return NextResponse.json(
       {
         error: `No ${provider.apiKeyEnvVar} is configured on the server (image provider: ${provider.label}). Copy .env.example to .env.local, add your key, and restart the dev server.`,
