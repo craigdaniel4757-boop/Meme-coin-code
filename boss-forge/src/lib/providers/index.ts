@@ -1,4 +1,4 @@
-import type { BuiltPrompt, GeneratedImageResult } from "@/types";
+import type { GameId, GeneratedImageResult } from "@/types";
 import { generateWithGemini } from "./gemini";
 import { generateWithOpenAI } from "./openai";
 import { generateWithPollinations } from "./pollinations";
@@ -10,7 +10,9 @@ export interface ImageProvider {
   label: string;
   /** Env var holding the API key. Omit for providers that need no key. */
   apiKeyEnvVar?: string;
-  generate: (prompts: BuiltPrompt[]) => Promise<GeneratedImageResult[]>;
+  /** Each provider builds its own prompts — diffusion and LLM-native image
+   *  models need very different prompt shapes (see promptEngine.ts). */
+  generate: (gameId: GameId, bossIdea: string) => Promise<GeneratedImageResult[]>;
 }
 
 const PROVIDERS: Record<ImageProviderId, ImageProvider> = {

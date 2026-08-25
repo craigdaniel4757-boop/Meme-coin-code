@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isValidGameId } from "@/lib/games";
-import { buildPrompts } from "@/lib/promptEngine";
 import { getActiveProvider } from "@/lib/providers";
 import type { GenerateRequestBody } from "@/types";
 
@@ -77,8 +76,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const prompts = buildPrompts(gameId, bossIdea);
-  const images = await provider.generate(prompts);
+  const images = await provider.generate(gameId, bossIdea);
 
   const anySucceeded = images.some((image) => image.imageDataUrl);
   if (!anySucceeded) {

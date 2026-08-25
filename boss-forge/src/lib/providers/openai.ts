@@ -1,5 +1,6 @@
 import OpenAI from "openai";
-import type { BuiltPrompt, GeneratedImageResult } from "@/types";
+import { buildPrompts } from "@/lib/promptEngine";
+import type { GameId, GeneratedImageResult } from "@/types";
 
 function errorMessageFrom(reason: unknown): string {
   if (reason && typeof reason === "object") {
@@ -10,7 +11,8 @@ function errorMessageFrom(reason: unknown): string {
   return "Image generation failed.";
 }
 
-export async function generateWithOpenAI(prompts: BuiltPrompt[]): Promise<GeneratedImageResult[]> {
+export async function generateWithOpenAI(gameId: GameId, bossIdea: string): Promise<GeneratedImageResult[]> {
+  const prompts = buildPrompts(gameId, bossIdea);
   const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   const model = process.env.IMAGE_MODEL || "gpt-image-1";
   const size = process.env.IMAGE_SIZE || "1024x1024";

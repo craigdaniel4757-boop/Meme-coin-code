@@ -1,5 +1,6 @@
 import { ApiError, FinishReason, GoogleGenAI, Modality } from "@google/genai";
-import type { BuiltPrompt, GeneratedImageResult } from "@/types";
+import { buildPrompts } from "@/lib/promptEngine";
+import type { GameId, GeneratedImageResult } from "@/types";
 
 const DEFAULT_MODEL = "gemini-2.5-flash-image";
 
@@ -44,7 +45,8 @@ function errorMessageFrom(reason: unknown): string {
   return "Image generation failed.";
 }
 
-export async function generateWithGemini(prompts: BuiltPrompt[]): Promise<GeneratedImageResult[]> {
+export async function generateWithGemini(gameId: GameId, bossIdea: string): Promise<GeneratedImageResult[]> {
+  const prompts = buildPrompts(gameId, bossIdea);
   const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   const model = process.env.GEMINI_MODEL || DEFAULT_MODEL;
   const results: GeneratedImageResult[] = [];

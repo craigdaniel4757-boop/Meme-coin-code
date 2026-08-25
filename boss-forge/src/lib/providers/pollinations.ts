@@ -1,4 +1,5 @@
-import type { BuiltPrompt, GeneratedImageResult } from "@/types";
+import { buildDiffusionPrompts } from "@/lib/promptEngine";
+import type { GameId, GeneratedImageResult } from "@/types";
 
 const ENDPOINT = "https://image.pollinations.ai/prompt";
 const DEFAULT_MODEL = "flux";
@@ -55,7 +56,8 @@ async function fetchOneImage(prompt: string): Promise<{ dataUrl?: string; error?
   }
 }
 
-export async function generateWithPollinations(prompts: BuiltPrompt[]): Promise<GeneratedImageResult[]> {
+export async function generateWithPollinations(gameId: GameId, bossIdea: string): Promise<GeneratedImageResult[]> {
+  const prompts = buildDiffusionPrompts(gameId, bossIdea);
   const settled = await Promise.allSettled(
     prompts.map((p, i) => sleep(i * CALL_STAGGER_MS).then(() => fetchOneImage(p.prompt)))
   );

@@ -47,6 +47,33 @@ const SHOT_VARIANTS: ShotVariant[] = [
 const UNIVERSAL_GUARDRAILS =
   "This is an entirely original creature — do not depict, copy, or caption any existing named character, logo, or trademarked title from the game. Any archetypes described above are technique and material references only, not a likeness to copy; invent a new design built around the stated boss concept that simply looks like it belongs in this game's bestiary. Render only the creature and its immediate environment: no text, no watermark, no UI, no health bars, no borders.";
 
+/**
+ * Condensed, comma-separated descriptor tags per game — for classic
+ * text-to-image diffusion models (Pollinations' flux), not the LLM-native
+ * image models above. Diffusion models don't read and reason about
+ * instructions the way GPT-image-1 or Gemini do; they condition on the
+ * prompt as a bag of tokens, so a long paragraph full of meta-instructions
+ * ("don't copy existing characters") is pure noise that dilutes the actual
+ * visual signal. These keep only concrete visual descriptors — no
+ * instructional sentences, no in-universe lineage trivia.
+ */
+const DIFFUSION_STYLE_TAGS: Record<GameId, string> = {
+  "elden-ring":
+    "FromSoftware Elden Ring concept art style, painterly digital oil and gouache brushwork, ornate gilded gold-leaf armor over blackened iron plate and tattered noble cloth, grotesque yet majestic asymmetric anatomy, dramatic chiaroscuro lighting with glowing magic particles, weathered stone ruins background, monumental epic scale, obsidian black and antique gold color palette, highly detailed dark fantasy game boss",
+  "dark-souls-3":
+    "FromSoftware Dark Souls III concept art style, heavy oil painting brushwork, soot-blackened plate armor, tattered burial shrouds, drifting ash and cinder particles, gothic cathedral ruins, single dramatic torchlight, heavy fog, desaturated soot grey bone white and dying-ember orange palette, tragic monstrous anatomy, highly detailed grim dark fantasy game boss",
+  terraria:
+    "Terraria pixel art sprite style, 2D retro 16-bit pixel art, bold dark outline around every shape, flat cel-shaded color fields, no smooth gradients, no anti-aliasing, vibrant saturated jewel-tone colors, chunky exaggerated proportions, oversized glowing eyes, clean hard-edged silhouette, indie game boss sprite",
+  palworld:
+    "Palworld style 3D creature render, Unreal Engine 5 photoreal PBR shading, physically accurate fur and scale texture, cartoon-rounded simplified proportions, big expressive eyes, natural outdoor sunlight, shallow depth of field, game photo-mode screenshot, earthy color palette with one vivid elemental accent color, survival game creature",
+};
+
+const DIFFUSION_SHOT_HINTS: Record<string, string> = {
+  action: "dynamic action pose, full body, mid-attack",
+  portrait: "close-up portrait, detailed face and head, upper body",
+  environment: "wide shot, small in frame, shown within its environment",
+};
+
 export function getStyleGuide(gameId: GameId): string {
   return STYLE_GUIDES[gameId];
 }
@@ -55,6 +82,7 @@ export function getShotVariants(): ShotVariant[] {
   return SHOT_VARIANTS;
 }
 
+/** For LLM-native image models (Gemini, gpt-image-1) that read and follow instructions. */
 export function buildPrompts(gameId: GameId, bossIdea: string): BuiltPrompt[] {
   const styleGuide = STYLE_GUIDES[gameId];
 
@@ -67,5 +95,16 @@ export function buildPrompts(gameId: GameId, bossIdea: string): BuiltPrompt[] {
       shot.hint,
       UNIVERSAL_GUARDRAILS,
     ].join("\n\n"),
+  }));
+}
+
+/** For classic diffusion models (Pollinations' flux): short, tag-based, subject-first. */
+export function buildDiffusionPrompts(gameId: GameId, bossIdea: string): BuiltPrompt[] {
+  const styleTags = DIFFUSION_STYLE_TAGS[gameId];
+
+  return SHOT_VARIANTS.map((shot) => ({
+    shotId: shot.id,
+    label: shot.label,
+    prompt: `${bossIdea}, ${styleTags}, ${DIFFUSION_SHOT_HINTS[shot.id]}, original creature, no text, no watermark`,
   }));
 }
