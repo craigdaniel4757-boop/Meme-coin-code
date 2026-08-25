@@ -1,0 +1,184 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #0b0b0f;
+  --bg-elevated: #131318;
+  --text: #e9e6df;
+  --text-muted: #9a978f;
+  --accent: #c9a24a;
+  --accent-soft: rgba(201, 162, 74, 0.16);
+  --border: rgba(255, 255, 255, 0.1);
+  --font-heading: var(--font-body);
+  --font-body-active: var(--font-body);
+}
+
+[data-game="elden-ring"] {
+  --bg: #0c0904;
+  --bg-elevated: #1b1509;
+  --text: #f4e8c8;
+  --text-muted: #b7a679;
+  --accent: #d9b03c;
+  --accent-soft: rgba(217, 176, 60, 0.16);
+  --border: rgba(217, 176, 60, 0.22);
+  --font-heading: var(--font-elden);
+  --font-body-active: var(--font-elden-body);
+}
+
+[data-game="dark-souls-3"] {
+  --bg: #09090a;
+  --bg-elevated: #17140f;
+  --text: #dad2c2;
+  --text-muted: #8c8577;
+  --accent: #bd6636;
+  --accent-soft: rgba(189, 102, 54, 0.16);
+  --border: rgba(189, 102, 54, 0.22);
+  --font-heading: var(--font-ds3);
+  --font-body-active: var(--font-ds3-body);
+}
+
+[data-game="terraria"] {
+  --bg: #0e1a13;
+  --bg-elevated: #15271b;
+  --text: #e7f4e9;
+  --text-muted: #8fb197;
+  --accent: #59d15c;
+  --accent-soft: rgba(89, 209, 92, 0.16);
+  --border: rgba(89, 209, 92, 0.25);
+  --font-heading: var(--font-terraria);
+  --font-body-active: var(--font-body);
+}
+
+[data-game="palworld"] {
+  --bg: #0c1b1c;
+  --bg-elevated: #14282a;
+  --text: #eaf7f2;
+  --text-muted: #8cbab3;
+  --accent: #3fcdb3;
+  --accent-soft: rgba(63, 205, 179, 0.16);
+  --border: rgba(63, 205, 179, 0.25);
+  --font-heading: var(--font-palworld);
+  --font-body-active: var(--font-palworld);
+}
+
+* {
+  border-color: var(--border);
+}
+
+html {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body-active), system-ui, sans-serif;
+  transition: background-color 0.6s ease, color 0.6s ease;
+}
+
+.font-heading {
+  font-family: var(--font-heading), system-ui, sans-serif;
+}
+
+.bg-vignette {
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%, var(--accent-soft), transparent 60%),
+    radial-gradient(ellipse 60% 50% at 100% 100%, var(--accent-soft), transparent 55%),
+    var(--bg);
+}
+
+.panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+}
+
+.chip {
+  border: 1px solid var(--border);
+  background: var(--accent-soft);
+  color: var(--text);
+  border-radius: 999px;
+  transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.chip:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
+}
+
+.btn-accent {
+  background: var(--accent);
+  color: #0a0a0a;
+  font-weight: 600;
+  transition: filter 0.15s ease, transform 0.15s ease;
+}
+
+.btn-accent:hover:not(:disabled) {
+  filter: brightness(1.1);
+  transform: translateY(-1px);
+}
+
+.btn-accent:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.text-accent {
+  color: var(--accent);
+}
+
+.border-accent {
+  border-color: var(--accent);
+}
+
+.glow-accent {
+  box-shadow: 0 0 40px -8px var(--accent);
+}
+
+/* Ambient drifting particles, reused across themes; color + shape come from
+   the active theme via currentColor/opacity so one component works everywhere. */
+.particle {
+  position: absolute;
+  bottom: -5%;
+  border-radius: 999px;
+  background: var(--accent);
+  filter: blur(0.5px);
+  animation-name: drift;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  pointer-events: none;
+}
+
+[data-game="terraria"] .particle {
+  border-radius: 2px;
+  filter: none;
+  image-rendering: pixelated;
+}
+
+/* Skeleton shimmer for loading image cards */
+.skeleton {
+  background: linear-gradient(
+    100deg,
+    var(--bg-elevated) 30%,
+    color-mix(in srgb, var(--accent) 18%, var(--bg-elevated)) 50%,
+    var(--bg-elevated) 70%
+  );
+  background-size: 200% 100%;
+}
+
+::selection {
+  background: var(--accent);
+  color: #0a0a0a;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--accent-soft);
+  border-radius: 999px;
+}
