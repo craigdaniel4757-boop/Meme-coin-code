@@ -1,0 +1,7 @@
+## Only needed for `python -m bot web` (the local live dashboard).
+## Kept separate from requirements.txt so scanning/backtesting/paper-trading
+## from the CLI never depend on a web framework.
+-r requirements.txt
+
+fastapi>=0.110,<1.0
+uvicorn>=0.27,<1.0

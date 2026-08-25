@@ -124,6 +124,31 @@ you deliberately change that setting *and* pass `--i-understand-the-risk`
 on the command line *and* set a funded `SOLANA_PRIVATE_KEY`. See
 [Live trading](#live-trading-solana) below.
 
+## Web dashboard
+
+A local, live-updating view of the exact same paper-trading engine `run`
+uses, in a browser, so portfolio value and buy-signal accuracy over time
+are something you watch build up instead of reading off a terminal:
+
+```bash
+pip install -r requirements-web.txt
+python -m bot web
+```
+
+Then open **http://127.0.0.1:8000** in your browser. Equity curve, win
+rate/profit factor/expectancy/drawdown (the same metrics `backtest` and
+`optimize-weights` use), open positions, recent trades, and this cycle's
+live BUY signals, all updating every few seconds on their own — no need
+to keep refreshing.
+
+**Deliberately paper-only and local-only**, not a placeholder: `web`
+always runs simulated fills regardless of `execution.mode` in config —
+there's no path from this command to live trading, not even by accident —
+and binds `127.0.0.1` by default, so nothing outside your own machine can
+reach it unless you explicitly pass a different `--host`. Kept in a
+separate `requirements-web.txt` so every other command still works without
+installing a web framework.
+
 ## Configuration
 
 All tunables live in `config/default.yaml` — chains to scan, discovery
@@ -158,7 +183,8 @@ bot/backtest/     Historical replay engine, performance metrics, and a
                   scoring-weight optimizer built on top of both
 bot/notify/       Optional Telegram / Discord alerts
 bot/storage/      SQLite persistence (candles, scan results, trades)
-bot/cli.py        scan / run / backtest / report / init-db subcommands
+bot/web.py        Local live dashboard (paper-only) -- `python -m bot web`
+bot/cli.py        scan / run / backtest / report / web / init-db subcommands
 ```
 
 Each layer talks to the next through plain typed objects (see

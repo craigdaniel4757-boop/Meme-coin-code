@@ -119,6 +119,37 @@ async def test_sell_without_kind_defaults_to_empty_string(db):
     assert trade.kind == ""
 
 
+async def test_equity_with_no_open_positions_is_just_cash(db):
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0)
+    assert provider.portfolio.equity({}) == pytest.approx(1000.0)
+
+
+async def test_equity_marks_open_position_to_current_price(db):
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
+    position = await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())
+
+    # 900 cash left + 100 units now worth $2 each = 1100
+    assert provider.portfolio.equity({"PAIR": 2.0}) == pytest.approx(1100.0)
+
+
+async def test_equity_falls_back_to_entry_price_when_pair_missing_from_current_prices(db):
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
+    await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())
+
+    # no price for "PAIR" in the dict -- equity() falls back to entry price, so this is a no-op mark
+    assert provider.portfolio.equity({}) == pytest.approx(1000.0)
+    assert provider.portfolio.equity({"SOME_OTHER_PAIR": 5.0}) == pytest.approx(1000.0)
+
+
+async def test_equity_reflects_remaining_fraction_after_partial_sell(db):
+    provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
+    position = await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())
+    await provider.sell(position, fraction=0.5, quote_price=1.0, reason="take-profit")
+
+    # cash back to ~950 (half the 100 sold at cost) + remaining 50 units @ $2
+    assert provider.portfolio.equity({"PAIR": 2.0}) == pytest.approx(950.0 + 50.0 * 2.0)
+
+
 async def test_daily_realized_pnl_sums_only_sells_in_window(db):
     provider = PaperExecutionProvider(db, starting_balance_usd=1000.0, simulated_slippage_bps=0, simulated_fee_bps=0)
     position = await provider.buy("solana", "PAIR", "MINT", "DOGE", 100.0, 1.0, "test", _risk_cfg())

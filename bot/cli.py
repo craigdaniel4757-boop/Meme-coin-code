@@ -490,6 +490,37 @@ def cmd_report(args: argparse.Namespace) -> None:
         db.close()
 
 
+def cmd_web(args: argparse.Namespace) -> None:
+    """Local live dashboard -- always paper trading, regardless of
+    execution.mode in config; see bot/web.py's module docstring for why
+    that's a deliberate, hard-coded choice rather than an oversight."""
+    try:
+        import uvicorn
+    except ImportError:
+        console.print(
+            "[red]The web dashboard needs extra dependencies that aren't installed. Run:\n"
+            "  pip install -r requirements-web.txt\n"
+            "then try again.[/red]"
+        )
+        sys.exit(1)
+
+    cfg = _load(args.config)
+    db = Database(cfg.storage.sqlite_path)
+    console.print(
+        f"[bold]Starting memebot dashboard (paper trading only) at "
+        f"http://{args.host}:{args.port}[/bold] -- open that address in your browser. Ctrl+C to stop."
+    )
+    from bot.web import build_app
+
+    app = build_app(cfg, db)
+    try:
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Stopped.[/yellow]")
+    finally:
+        db.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", default="config/default.yaml", help="Path to YAML config file")
@@ -573,6 +604,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p_opt.add_argument("--seed", type=int, default=42, help="Random seed -- fixed by default for reproducible results")
     p_opt.set_defaults(func=cmd_optimize_weights)
+
+    p_web = sub.add_parser(
+        "web",
+        help="Local live dashboard in your browser -- paper trading only, see docs/STRATEGY.md",
+        parents=[common],
+    )
+    p_web.add_argument(
+        "--host", default="127.0.0.1",
+        help="Bind address (default: 127.0.0.1, i.e. only your own machine can reach it)",
+    )
+    p_web.add_argument("--port", type=int, default=8000, help="Port to serve the dashboard on")
+    p_web.set_defaults(func=cmd_web)
 
     return parser
 
