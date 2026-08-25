@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
 import { isValidGameId } from "@/lib/games";
 import { buildPrompts } from "@/lib/promptEngine";
-import type { GenerateRequestBody, GeneratedImageResult } from "@/types";
+import { getActiveProvider } from "@/lib/providers";
+import type { GenerateRequestBody } from "@/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -24,15 +24,6 @@ function isRateLimited(key: string): boolean {
   recent.push(now);
   requestLog.set(key, recent);
   return recent.length > RATE_LIMIT_MAX_REQUESTS;
-}
-
-function errorMessageFrom(reason: unknown): string {
-  if (reason && typeof reason === "object") {
-    const withError = reason as { error?: { message?: string }; message?: string };
-    if (withError.error?.message) return withError.error.message;
-    if (withError.message) return withError.message;
-  }
-  return "Image generation failed.";
 }
 
 export async function POST(req: NextRequest) {
@@ -75,63 +66,20 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const apiKey = process.env.OPENAI_API_KEY;
+  const provider = getActiveProvider();
+  const apiKey = process.env[provider.apiKeyEnvVar];
   if (!apiKey) {
     return NextResponse.json(
       {
-        error:
-          "No OPENAI_API_KEY is configured on the server. Copy .env.example to .env.local, add your key, and restart the dev server.",
+        error: `No ${provider.apiKeyEnvVar} is configured on the server (image provider: ${provider.label}). Copy .env.example to .env.local, add your key, and restart the dev server.`,
         code: "MISSING_API_KEY",
       },
       { status: 500 }
     );
   }
 
-  const openai = new OpenAI({ apiKey });
-  const model = process.env.IMAGE_MODEL || "gpt-image-1";
-  const size = process.env.IMAGE_SIZE || "1024x1024";
-  const quality = process.env.IMAGE_QUALITY || "high";
-
   const prompts = buildPrompts(gameId, bossIdea);
-
-  const settled = await Promise.allSettled(
-    prompts.map((p) =>
-      openai.images.generate({
-        model,
-        prompt: p.prompt,
-        size: size as any,
-        quality: quality as any,
-        n: 1,
-      })
-    )
-  );
-
-  const images: GeneratedImageResult[] = settled.map((result, index) => {
-    const built = prompts[index]!;
-    if (result.status === "fulfilled") {
-      const b64 = result.value.data?.[0]?.b64_json;
-      if (b64) {
-        return {
-          shotId: built.shotId,
-          shotLabel: built.label,
-          prompt: built.prompt,
-          imageDataUrl: `data:image/png;base64,${b64}`,
-        };
-      }
-      return {
-        shotId: built.shotId,
-        shotLabel: built.label,
-        prompt: built.prompt,
-        error: "The model returned no image data.",
-      };
-    }
-    return {
-      shotId: built.shotId,
-      shotLabel: built.label,
-      prompt: built.prompt,
-      error: errorMessageFrom(result.reason),
-    };
-  });
+  const images = await provider.generate(prompts);
 
   const anySucceeded = images.some((image) => image.imageDataUrl);
   if (!anySucceeded) {
