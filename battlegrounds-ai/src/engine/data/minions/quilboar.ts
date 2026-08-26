@@ -1,0 +1,140 @@
+import type { MinionDef } from "@/engine/types";
+import { POOL_COPIES_BY_TIER } from "@/engine/data/constants";
+import { consumeBloodGemsOntoSelf, gainBloodGemsBattlecry } from "@/engine/data/effectHelpers";
+
+export const QUILBOAR_MINIONS: MinionDef[] = [
+  {
+    id: "quilboar-bristled-scout",
+    name: "Bristled Scout",
+    tier: 1,
+    tribe: "Quilboar",
+    attack: 2,
+    health: 2,
+    keywords: ["Taunt"],
+    text: "Taunt. Battlecry: Gain a Blood Gem (+1/+1 held in reserve).",
+    poolCopies: POOL_COPIES_BY_TIER[1],
+    effects: { battlecry: gainBloodGemsBattlecry(1) },
+  },
+  {
+    id: "quilboar-thorned-gatherer",
+    name: "Thorned Gatherer",
+    tier: 1,
+    tribe: "Quilboar",
+    attack: 1,
+    health: 3,
+    keywords: [],
+    text: "Battlecry: Consume all Blood Gems, gaining their stats doubled onto this minion.",
+    poolCopies: POOL_COPIES_BY_TIER[1],
+    effects: { battlecry: consumeBloodGemsOntoSelf() },
+  },
+  {
+    id: "quilboar-tuskguard",
+    name: "Tuskguard Warrior",
+    tier: 2,
+    tribe: "Quilboar",
+    attack: 3,
+    health: 4,
+    keywords: ["Taunt"],
+    text: "Taunt. Battlecry: Gain a Blood Gem.",
+    poolCopies: POOL_COPIES_BY_TIER[2],
+    effects: { battlecry: gainBloodGemsBattlecry(1) },
+  },
+  {
+    id: "quilboar-gemfused-brute",
+    name: "Gemfused Brute",
+    tier: 2,
+    tribe: "Quilboar",
+    attack: 2,
+    health: 3,
+    keywords: [],
+    text: "Battlecry: Consume all Blood Gems, gaining their stats doubled onto this minion.",
+    poolCopies: POOL_COPIES_BY_TIER[2],
+    effects: { battlecry: consumeBloodGemsOntoSelf() },
+  },
+  {
+    id: "quilboar-hogrider",
+    name: "Hogrider",
+    tier: 3,
+    tribe: "Quilboar",
+    attack: 4,
+    health: 5,
+    keywords: [],
+    text: "Battlecry: Gain 2 Blood Gems.",
+    poolCopies: POOL_COPIES_BY_TIER[3],
+    effects: { battlecry: gainBloodGemsBattlecry(2) },
+  },
+  {
+    id: "quilboar-razortusk-chief",
+    name: "Razortusk Chief",
+    tier: 3,
+    tribe: "Quilboar",
+    attack: 3,
+    health: 6,
+    keywords: ["Taunt"],
+    text: "Taunt. Battlecry: Give your Taunt minions a Blood Gem's worth of stats (+1/+1 each).",
+    poolCopies: POOL_COPIES_BY_TIER[3],
+    effects: {
+      battlecry: (ctx) => {
+        for (const m of ctx.player.board) if (m.keywords.includes("Taunt")) ctx.api.buffMinion(m, 1, 1);
+      },
+    },
+  },
+  {
+    id: "quilboar-bloodtusk-shaman",
+    name: "Bloodtusk Shaman",
+    tier: 4,
+    tribe: "Quilboar",
+    attack: 5,
+    health: 5,
+    keywords: [],
+    text: "Battlecry: Consume all Blood Gems, gaining their stats doubled onto this minion.",
+    poolCopies: POOL_COPIES_BY_TIER[4],
+    effects: { battlecry: consumeBloodGemsOntoSelf() },
+  },
+  {
+    id: "quilboar-warband-chief",
+    name: "Warband Chief",
+    tier: 4,
+    tribe: "Quilboar",
+    attack: 4,
+    health: 4,
+    keywords: [],
+    text: "Battlecry: Gain 3 Blood Gems.",
+    poolCopies: POOL_COPIES_BY_TIER[4],
+    effects: { battlecry: gainBloodGemsBattlecry(3) },
+  },
+  {
+    id: "quilboar-ironhide-overlord",
+    name: "Ironhide Overlord",
+    tier: 5,
+    tribe: "Quilboar",
+    attack: 6,
+    health: 8,
+    keywords: ["Taunt"],
+    text: "Taunt. Start of Combat: Give your Taunt minions +3/+3.",
+    poolCopies: POOL_COPIES_BY_TIER[5],
+    effects: {
+      startOfCombat: (ctx) => {
+        for (const m of ctx.owner.board) if (m.keywords.includes("Taunt")) ctx.api.buff(m, 3, 3);
+        ctx.log(`${ctx.self.name} rallies the bristling line.`);
+      },
+    },
+  },
+  {
+    id: "quilboar-godslayer-warlord",
+    name: "Godslayer Warlord",
+    tier: 6,
+    tribe: "Quilboar",
+    attack: 7,
+    health: 7,
+    keywords: [],
+    text: "Battlecry: Consume all Blood Gems, gaining their stats tripled onto this minion.",
+    poolCopies: POOL_COPIES_BY_TIER[6],
+    effects: {
+      battlecry: (ctx) => {
+        const n = ctx.api.consumeBloodGems(ctx.player);
+        if (n > 0) ctx.api.buffMinion(ctx.self, n * 3, n * 3);
+      },
+    },
+  },
+];
