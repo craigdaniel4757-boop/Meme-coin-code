@@ -1,17 +1,22 @@
-import type { AgentProfile, DecisionExplanation, GameAction, PlayerState, Tribe } from "@/engine/types";
+import type { AgentProfile, DecisionExplanation, GameAction, Keyword, MinionInstance, PlayerState, Tribe } from "@/engine/types";
 import type { DecisionResult, ScoredAction } from "@/engine/ai/policy";
 import type { FeatureContext } from "@/engine/ai/features";
 import { FEATURE_DEFS } from "@/engine/ai/features";
 import { tribeMeta } from "@/engine/data/tribes";
+import { KEYWORD_META } from "@/engine/data/keywords";
 import { getHeroDef } from "@/engine/data/heroes";
 
-function describeAction(action: GameAction, player: PlayerState): string {
+function tribeLabel(t: Tribe): string {
+  return tribeMeta(t).label;
+}
+
+function baseActionLabel(action: GameAction, player: PlayerState): string {
   switch (action.kind) {
     case "buy": {
       const m = player.shop[action.shopIndex ?? -1];
       if (!m) return "Considers the tavern offer";
       const goldTxt = m.golden ? " golden" : "";
-      return `Buys **${m.name}** (${m.attack}/${m.health}${goldTxt}, ${tribeMeta(m.tribe).label})`;
+      return `Buys **${m.name}** (${m.attack}/${m.health}${goldTxt}, ${tribeLabel(m.tribe)})`;
     }
     case "sell": {
       const m = player.board[action.boardIndex ?? -1];
@@ -55,25 +60,52 @@ function rawStateFactors(weights: number[], features: number[]): FactorRow[] {
   return rows.slice(0, 3);
 }
 
-function pickComparisonAlt(decision: DecisionResult): ScoredAction | null {
+function compareFactors(weights: number[], chosen: ScoredAction, alt: ScoredAction): FactorRow[] {
+  const rows = FEATURE_DEFS.map((def, i) => ({
+    key: def.key,
+    label: def.label,
+    weight: weights[i],
+    contribution: weights[i] * (chosen.features[i] - alt.features[i]),
+  })).filter((r) => r.key !== "bias" && Math.abs(r.contribution) > 0.008);
+  rows.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+  return rows.slice(0, 3);
+}
+
+/** Best-scoring alternative of any kind, used when there's no same-kind peer to name. */
+function pickBestAlt(decision: DecisionResult): ScoredAction | null {
   const { chosen, alternatives } = decision;
   if (alternatives.length < 2) return null;
   return chosen === alternatives[0] ? alternatives[1] : alternatives[0];
 }
 
-function differentiatingFactors(weights: number[], decision: DecisionResult): FactorRow[] {
-  const alt = pickComparisonAlt(decision);
-  if (!alt) return rawStateFactors(weights, decision.chosen.features);
+const KEY_KEYWORDS: Keyword[] = ["Taunt", "DivineShield", "Poisonous", "Reborn", "Windfury", "MegaWindfury", "Avenge", "Frenzy", "Stealth"];
 
-  const rows = FEATURE_DEFS.map((def, i) => ({
-    key: def.key,
-    label: def.label,
-    weight: weights[i],
-    contribution: weights[i] * (decision.chosen.features[i] - alt.features[i]),
-  })).filter((r) => r.key !== "bias" && Math.abs(r.contribution) > 0.008);
-  rows.sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution));
+function concreteMinionComparison(chosen: MinionInstance, rejected: MinionInstance, boardBefore: MinionInstance[]): string[] {
+  const clauses: string[] = [];
 
-  return rows.length > 0 ? rows.slice(0, 3) : rawStateFactors(weights, decision.chosen.features);
+  if (chosen.tribe !== rejected.tribe && chosen.tribe !== "None") {
+    const n = boardBefore.filter((m) => m.tribe === chosen.tribe || m.tribe === "All").length;
+    if (n >= 1) clauses.push(`the ${n} other ${tribeLabel(chosen.tribe)}${n > 1 ? "s" : ""} it already has on board`);
+    else clauses.push(`starting to lean into ${tribeLabel(chosen.tribe)}`);
+  }
+
+  const chosenStats = chosen.attack + chosen.health;
+  const rejectedStats = rejected.attack + rejected.health;
+  const delta = chosenStats - rejectedStats;
+  if (delta >= 2) {
+    clauses.push(`the extra ${delta} combined stats (${chosen.attack}/${chosen.health} vs ${rejected.attack}/${rejected.health})`);
+  } else if (delta <= -2) {
+    clauses.push(`the tribe fit, even giving up ${Math.abs(delta)} stats for it (${chosen.attack}/${chosen.health} vs ${rejected.attack}/${rejected.health})`);
+  }
+
+  const chosenOnlyKeywords = chosen.keywords.filter((k) => KEY_KEYWORDS.includes(k) && !rejected.keywords.includes(k));
+  if (chosenOnlyKeywords.length > 0) {
+    clauses.push(`the ${KEYWORD_META[chosenOnlyKeywords[0]].label} it brings`);
+  }
+
+  if (chosen.golden && !rejected.golden) clauses.push("its golden stats");
+
+  return clauses;
 }
 
 const PHRASE_VARIANTS: Record<string, { positive: string[]; negative: string[] }> = {
@@ -135,19 +167,22 @@ const PAIR_CONNECTORS: ((a: string, b: string) => string)[] = [
   (a, b) => `weighing ${a} and ${b}`,
   (a, b) => `leaning on ${a}, with ${b} reinforcing it`,
   (a, b) => `driven mainly by ${a}, plus ${b}`,
-  (a, b) => `favoring ${a} over the alternatives, and ${b}`,
+  (a, b) => `for ${a}, and ${b}`,
 ];
 
-const SINGLE_CONNECTORS: ((a: string) => string)[] = [(a) => `weighing ${a}`, (a) => `driven mainly by ${a}`, (a) => `leaning on ${a}`, (a) => `swayed by ${a}`];
+const SINGLE_CONNECTORS: ((a: string) => string)[] = [(a) => `weighing ${a}`, (a) => `driven mainly by ${a}`, (a) => `leaning on ${a}`, (a) => `for ${a}`, (a) => `swayed by ${a}`];
 
 function buildReasonClause(clauses: string[]): string | null {
-  if (clauses.length === 0) return null;
-  if (clauses.length === 1) return pick(SINGLE_CONNECTORS)(clauses[0]);
-  return pick(PAIR_CONNECTORS)(clauses[0], clauses[1]);
+  const trimmed = clauses.slice(0, 2);
+  if (trimmed.length === 0) return null;
+  if (trimmed.length === 1) return pick(SINGLE_CONNECTORS)(trimmed[0]);
+  return pick(PAIR_CONNECTORS)(trimmed[0], trimmed[1]);
 }
 
-function tribeLabel(t: Tribe): string {
-  return tribeMeta(t).label;
+function joinClauses(clauses: string[]): string | null {
+  const trimmed = clauses.slice(0, 2);
+  if (trimmed.length === 0) return null;
+  return trimmed.join(", and ");
 }
 
 function contextualDetail(player: PlayerState, ctx: FeatureContext): string | null {
@@ -183,6 +218,50 @@ function contextualDetail(player: PlayerState, ctx: FeatureContext): string | nu
   return notes.length > 0 ? pick(notes) : null;
 }
 
+const CLOSE_CALL_STANDALONE = ["It's a close call between the two, but this edges it.", "There's not much separating the two — this one reads marginally better.", "Both looked similar; this one came out just ahead."];
+
+/** For buy/sell: name the specific alternative it passed up and compare directly against it. Skips identical duplicate copies — comparing a card to itself explains nothing. */
+function buildNamedComparisonSentence(action: GameAction, player: PlayerState, decision: DecisionResult, weights: number[]): { sentence: string; usedAlt: ScoredAction } | null {
+  if (action.kind === "buy") {
+    const chosen = player.shop[action.shopIndex ?? -1];
+    if (!chosen) return null;
+    const peerAlt = decision.alternatives.find(
+      (a) => a.action.kind === "buy" && a !== decision.chosen && player.shop[a.action.shopIndex ?? -1]?.defId !== chosen.defId,
+    );
+    if (!peerAlt) return null;
+    const rejected = player.shop[peerAlt.action.shopIndex ?? -1];
+    if (!rejected) return null;
+
+    const goldTxt = chosen.golden ? " golden" : "";
+    const concrete = concreteMinionComparison(chosen, rejected, player.board);
+    const abstract = compareFactors(weights, decision.chosen, peerAlt).map((f) => factorClause(f.key, f.contribution));
+    const reason = buildReasonClause([...concrete, ...abstract]);
+    const lead = `Buys **${chosen.name}** (${chosen.attack}/${chosen.health}${goldTxt}, ${tribeLabel(chosen.tribe)}) over **${rejected.name}**`;
+    const sentence = reason ? `${lead}, ${reason}.` : `${lead}. ${pick(CLOSE_CALL_STANDALONE)}`;
+    return { sentence, usedAlt: peerAlt };
+  }
+
+  if (action.kind === "sell") {
+    const chosen = player.board[action.boardIndex ?? -1];
+    if (!chosen) return null;
+    const peerAlt = decision.alternatives.find(
+      (a) => a.action.kind === "sell" && a !== decision.chosen && player.board[a.action.boardIndex ?? -1]?.defId !== chosen.defId,
+    );
+    if (!peerAlt) return null;
+    const kept = player.board[peerAlt.action.boardIndex ?? -1];
+    if (!kept) return null;
+
+    const concrete = concreteMinionComparison(kept, chosen, player.board);
+    const abstract = compareFactors(weights, decision.chosen, peerAlt).map((f) => factorClause(f.key, f.contribution));
+    const reason = joinClauses([...concrete, ...abstract]);
+    const lead = `Sells **${chosen.name}** rather than **${kept.name}**`;
+    const sentence = reason ? `${lead}, keeping the latter for ${reason}.` : `${lead}. ${pick(CLOSE_CALL_STANDALONE)}`;
+    return { sentence, usedAlt: peerAlt };
+  }
+
+  return null;
+}
+
 export function renderCommentary(
   action: GameAction,
   preActionPlayer: PlayerState,
@@ -191,11 +270,23 @@ export function renderCommentary(
   ctx: FeatureContext,
   gamesPlayed?: number,
 ): { text: string; explanation: DecisionExplanation } {
-  const actionLabel = describeAction(action, preActionPlayer);
-  const topFactors = differentiatingFactors(profile.weights, decision);
-  const reasonClause = buildReasonClause(topFactors.map((f) => factorClause(f.key, f.contribution)));
+  const actionLabel = baseActionLabel(action, preActionPlayer);
+  const named = buildNamedComparisonSentence(action, preActionPlayer, decision, profile.weights);
 
-  const sentence = reasonClause ? `${actionLabel}, ${reasonClause}.` : `${actionLabel}.`;
+  let sentence: string;
+  let topFactors: FactorRow[];
+
+  if (named) {
+    sentence = named.sentence;
+    topFactors = compareFactors(profile.weights, decision.chosen, named.usedAlt);
+  } else {
+    const alt = pickBestAlt(decision);
+    topFactors = alt ? compareFactors(profile.weights, decision.chosen, alt) : rawStateFactors(profile.weights, decision.chosen.features);
+    const reasonClause = buildReasonClause(topFactors.map((f) => factorClause(f.key, f.contribution)));
+    if (reasonClause) sentence = `${actionLabel}, ${reasonClause}.`;
+    else if (alt) sentence = `${actionLabel}. ${pick(CLOSE_CALL_STANDALONE)}`;
+    else sentence = `${actionLabel}.`;
+  }
 
   const extraCandidates: (string | null)[] = [
     decision.exploratory ? "It's deliberately trying a less obvious line here to keep exploring." : null,
@@ -204,7 +295,7 @@ export function renderCommentary(
     gamesPlayed != null && gamesPlayed > 0 ? `This kind of read has been shaped by ${gamesPlayed.toLocaleString()} games of self-play so far.` : null,
   ];
   const extra = extraCandidates.find((c) => c != null) ?? null;
-  const showExtra = extra != null && (extra === extraCandidates[0] || Math.random() < 0.35);
+  const showExtra = extra != null && (extra === extraCandidates[0] || Math.random() < 0.3);
 
   const text = showExtra && extra ? `${sentence} ${extra}` : sentence;
 
