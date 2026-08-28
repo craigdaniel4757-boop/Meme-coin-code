@@ -45,6 +45,10 @@ class RiskConfig:
     trailing_stop_distance_pct: float = 18.0
     max_hold_minutes: float = 720.0
     max_daily_loss_pct: float = 8.0
+    # On by default -- see check_circuit_breaker's docstring for the one
+    # legitimate reason to turn this off (measuring unconstrained win rate
+    # in paper trading), and why it should stay on otherwise.
+    require_daily_loss_circuit_breaker: bool = True
     max_slippage_bps: float = 150.0
     # Deliberately higher than SafetyConfig.max_liquidity_drawdown_pct (the
     # entry gate): a moderate liquidity wobble shouldn't panic-sell an open
@@ -101,7 +105,17 @@ def check_circuit_breaker(
 ) -> tuple[bool, str]:
     """Returns (halted, reason). Halts new entries for the day once realized
     losses reach `max_daily_loss_pct` of bankroll. Existing positions are
-    still managed (stops/take-profits keep working) -- only new entries stop."""
+    still managed (stops/take-profits keep working) -- only new entries stop.
+
+    Off entirely when `require_daily_loss_circuit_breaker` is False --
+    useful for a paper-trading run specifically meant to measure a
+    strategy's win rate/behavior over many trades unconstrained, where an
+    early stop on one bad day would truncate the sample before it means
+    anything. Leave this on for anything resembling real risk management,
+    including live trading -- it exists specifically so one bad day can't
+    compound into a much worse one."""
+    if not cfg.require_daily_loss_circuit_breaker:
+        return False, ""
     if bankroll_usd <= 0:
         return True, "bankroll depleted"
     loss_pct = -daily_realized_pnl_usd / bankroll_usd * 100

@@ -178,6 +178,25 @@ def test_circuit_breaker_halts_on_depleted_bankroll():
     assert "depleted" in reason
 
 
+def test_circuit_breaker_disabled_never_halts_even_past_the_loss_limit():
+    cfg = _cfg(max_daily_loss_pct=8.0, require_daily_loss_circuit_breaker=False)
+    halted, reason = check_circuit_breaker(daily_realized_pnl_usd=-900.0, bankroll_usd=1000.0, cfg=cfg)
+    assert not halted
+    assert reason == ""
+
+
+def test_circuit_breaker_disabled_ignores_depleted_bankroll_too():
+    cfg = _cfg(require_daily_loss_circuit_breaker=False)
+    halted, reason = check_circuit_breaker(daily_realized_pnl_usd=0.0, bankroll_usd=0.0, cfg=cfg)
+    assert not halted
+    assert reason == ""
+
+
+def test_circuit_breaker_defaults_to_enabled():
+    cfg = _cfg()
+    assert cfg.require_daily_loss_circuit_breaker is True
+
+
 def test_liquidity_crash_triggers_emergency_exit_before_stop_loss():
     # Price hasn't even hit the stop-loss (entry 1.0, stop 0.85, current
     # 0.95) -- the liquidity crash should still force a full exit, overriding

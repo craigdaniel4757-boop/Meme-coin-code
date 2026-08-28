@@ -191,6 +191,12 @@ risk:
   # a going-nowhere position isn't the "quick profits" this is tuned for.
   max_hold_minutes: 120
   max_daily_loss_pct: 8.0             # circuit breaker: halt new entries for the day past this
+  # On by default -- turn off only for a paper-trading run specifically
+  # meant to measure a strategy's unconstrained win rate over many trades,
+  # where an early stop on one bad day would cut the sample short before
+  # it means anything. Leave this on for anything resembling real risk
+  # management, including live trading.
+  require_daily_loss_circuit_breaker: true
   max_slippage_bps: 150
   # Deliberately higher than safety.max_liquidity_drawdown_pct (the entry
   # gate): a moderate liquidity wobble shouldn't panic-sell an open position,

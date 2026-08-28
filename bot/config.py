@@ -155,6 +155,7 @@ class RiskYamlConfig(BaseModel):
     trailing_stop_distance_pct: float = 18.0
     max_hold_minutes: float = 720.0
     max_daily_loss_pct: float = 8.0
+    require_daily_loss_circuit_breaker: bool = True
     max_slippage_bps: float = 150.0
     emergency_exit_liquidity_drawdown_pct: float = 60.0
     min_agreeing_strategies: int = 1
@@ -302,6 +303,7 @@ def build_risk_config(cfg: AppConfig) -> RiskConfig:
         trailing_stop_distance_pct=r.trailing_stop_distance_pct,
         max_hold_minutes=r.max_hold_minutes,
         max_daily_loss_pct=r.max_daily_loss_pct,
+        require_daily_loss_circuit_breaker=r.require_daily_loss_circuit_breaker,
         max_slippage_bps=r.max_slippage_bps,
         emergency_exit_liquidity_drawdown_pct=r.emergency_exit_liquidity_drawdown_pct,
         min_agreeing_strategies=r.min_agreeing_strategies,

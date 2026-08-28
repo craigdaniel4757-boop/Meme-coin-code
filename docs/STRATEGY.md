@@ -346,7 +346,13 @@ rather than the hundreds of candidates a cycle might discover:
   `max_daily_loss_pct` of the *starting* bankroll — deliberately measured
   against a fixed baseline rather than shrinking current equity, so the
   breaker's dollar threshold doesn't get more lenient as a bad day
-  compounds.
+  compounds. On by default (`risk.require_daily_loss_circuit_breaker`);
+  the one legitimate reason to turn it off is a paper-trading run
+  specifically meant to measure a strategy's unconstrained win rate over
+  many trades, where stopping early on one bad day would cut the sample
+  short before it means anything. Leave it on for anything resembling
+  real risk management, including live trading — it exists specifically
+  so one bad day can't compound into a much worse one.
 
 ## 6. Backtesting: what it can and can't tell you
 
