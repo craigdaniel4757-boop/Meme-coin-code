@@ -246,14 +246,26 @@ pip install -r requirements-rangebreak.txt
 python -m rangebreak
 ```
 
-Open **http://127.0.0.1:8010**. Pick a ticker and date range, hit "Run
-backtest", then click any row in the results table to see that day's chart
-with the range box, sweep, entry, stop, and target all marked. Ships with
-zero setup using seeded synthetic demo data (see below); switch the "Data
-source" dropdown to Yahoo Finance for real prices once you're running
-somewhere with open outbound network access. Binds `127.0.0.1` by default,
+Open **http://127.0.0.1:8010**. It defaults to live Yahoo Finance data for
+`RY.TO` (Royal Bank of Canada, Toronto listing) over the last ~6 trading
+days — pick any other ticker and date range, hit "Run backtest", then click
+any row in the results table to see that day's chart with the range box,
+sweep, entry, stop, and target all marked. Needs open outbound network
+access to reach Yahoo; if you're running somewhere without it, switch the
+"Data source" dropdown to **Synthetic demo data** for a zero-setup,
+clearly-fake dataset instead (see below). Binds `127.0.0.1` by default,
 same local-only posture as `python -m bot web` — pass `--host`/`--port` to
 change it.
+
+Note on tickers like `RY` (Royal Bank of Canada): the plain-English name of
+a company and its actual ticker symbol aren't always the same thing, and
+Yahoo Finance's suffix convention for non-US exchanges (`.TO` for Toronto,
+`.L` for London, etc.) matters — `RY` alone means the NYSE (USD) listing,
+`RY.TO` means the TSX (CAD) listing, and a *different*, unrelated company
+(RBC Bearings Inc.) actually owns the literal ticker `RBC`. Get the wrong
+one and you'll get real, validly-fetched data for the wrong instrument with
+no error at all — worth double-checking on
+[finance.yahoo.com](https://finance.yahoo.com) before trusting a result.
 
 ### The strategy, exactly as implemented
 

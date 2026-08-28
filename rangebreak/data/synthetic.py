@@ -40,7 +40,7 @@ SCENARIOS = (
     "no_entry_trigger",
 )
 
-DEMO_TICKERS = ("SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "IWM")
+DEMO_TICKERS = ("RY.TO", "RY", "SPY", "QQQ", "AAPL", "MSFT", "NVDA", "TSLA", "IWM")
 
 
 def _seed_int(*parts: str) -> int:

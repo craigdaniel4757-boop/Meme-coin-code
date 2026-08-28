@@ -2,8 +2,27 @@
   "use strict";
   const LWC = window.LightweightCharts;
   let chart = null, series = null, markersApi = null, priceLines = [];
+  let currencyPrefix = "$"; // updated per-ticker before each render -- see currencyForTicker()
 
   const $ = (id) => document.getElementById(id);
+
+  // Yahoo Finance ticker suffix -> currency, for the handful of non-US
+  // exchanges someone backtesting a specific stock is likely to hit. This is
+  // a suffix guess, not a query against Yahoo's own per-symbol currency
+  // field -- good enough to avoid silently labeling CAD/GBP/EUR prices with
+  // a bare "$" (easy to misread as USD), not a source of truth beyond that.
+  const SUFFIX_CURRENCY = {
+    ".TO": "C$", ".V": "C$", ".CN": "C$", ".NE": "C$", // Canada (TSX/TSXV/CSE/NEO)
+    ".L": "£", // London
+    ".DE": "€", ".PA": "€", ".AS": "€", ".MI": "€", // eurozone
+  };
+  function currencyForTicker(ticker) {
+    const t = (ticker || "").toUpperCase();
+    for (const suffix in SUFFIX_CURRENCY) {
+      if (t.endsWith(suffix)) return SUFFIX_CURRENCY[suffix];
+    }
+    return "$";
+  }
 
   function etTime(iso) {
     if (!iso) return "-";
@@ -14,7 +33,7 @@
     return Math.floor(new Date(iso).getTime() / 1000);
   }
   function fmtPx(v) {
-    return v === null || v === undefined ? "-" : "$" + Number(v).toFixed(2);
+    return v === null || v === undefined ? "-" : currencyPrefix + Number(v).toFixed(2);
   }
   function fmtR(v) {
     if (v === null || v === undefined) return "-";
@@ -110,6 +129,7 @@
       showError("Enter a ticker.");
       return;
     }
+    currencyPrefix = currencyForTicker(ticker);
     const params = new URLSearchParams(Object.assign({ ticker, start: $("start").value, end: $("end").value, source: $("source").value }, costParams()));
     const btn = $("run-btn");
     btn.disabled = true;
@@ -185,6 +205,7 @@
     if (rowEl) rowEl.classList.add("selected");
     showError(null);
     const ticker = $("ticker").value.trim().toUpperCase();
+    currencyPrefix = currencyForTicker(ticker);
     const params = new URLSearchParams(Object.assign({ ticker, date, source: $("source").value }, costParams()));
     try {
       const res = await fetch("/api/day?" + params.toString());
@@ -312,7 +333,7 @@
     setDefaultDates($("source").value);
   });
 
-  setDefaultDates("synthetic");
+  setDefaultDates($("source").value);
   updateSourceBanner();
   loadInstruments();
 })();

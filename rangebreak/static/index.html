@@ -15,7 +15,7 @@
     <div class="controls">
       <div class="field">
         <label for="ticker">Ticker</label>
-        <input id="ticker" type="text" value="SPY" list="ticker-list">
+        <input id="ticker" type="text" value="RY.TO" list="ticker-list">
         <datalist id="ticker-list"></datalist>
       </div>
       <div class="field">
@@ -29,8 +29,8 @@
       <div class="field">
         <label for="source">Data source</label>
         <select id="source">
-          <option value="synthetic" selected>Synthetic demo data</option>
-          <option value="yahoo">Yahoo Finance (live, needs network)</option>
+          <option value="synthetic">Synthetic demo data</option>
+          <option value="yahoo" selected>Yahoo Finance (live, needs network)</option>
         </select>
       </div>
       <div class="field">
@@ -41,10 +41,10 @@
     <details id="advanced">
       <summary>Advanced: tick size, spread, slippage, commission, session close</summary>
       <div class="adv-grid">
-        <div class="field"><label for="tick_size">Tick size ($)</label><input id="tick_size" type="number" step="0.0001" value="0.01"></div>
+        <div class="field"><label for="tick_size">Tick size</label><input id="tick_size" type="number" step="0.0001" value="0.01"></div>
         <div class="field"><label for="spread_ticks">Spread (ticks)</label><input id="spread_ticks" type="number" step="0.5" value="2"></div>
         <div class="field"><label for="slippage_ticks">Slippage (ticks)</label><input id="slippage_ticks" type="number" step="0.5" value="2"></div>
-        <div class="field"><label for="commission_per_share">Commission ($/share, round-trip)</label><input id="commission_per_share" type="number" step="0.001" value="0"></div>
+        <div class="field"><label for="commission_per_share">Commission (per share, round-trip)</label><input id="commission_per_share" type="number" step="0.001" value="0"></div>
         <div class="field"><label for="session_close">Session close (ET, HH:MM)</label><input id="session_close" type="text" value="16:00" style="width:70px"></div>
         <div class="field"><label for="lookback_hours">Swing lookback buffer (hrs before 8am)</label><input id="lookback_hours" type="number" step="0.5" value="1"></div>
       </div>
