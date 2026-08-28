@@ -36,6 +36,19 @@ def _compute_range(range_candles: list[Candle]) -> tuple[float, float]:
     return max(c.high for c in range_candles), min(c.low for c in range_candles)
 
 
+def _coverage_note(candles: list[Candle]) -> str:
+    """Describes what data *was* actually fetched for the day, so an
+    insufficient-data note distinguishes "the provider had nothing at all
+    for this date" from "it had data, just not in this specific window" --
+    e.g. a real (not a bug) gap in an unofficial free endpoint's pre-market
+    coverage for a particular exchange -- without needing a second request
+    to tell the two apart."""
+    if not candles:
+        return "No candles at all were returned for this date."
+    first, last = candles[0].ts, candles[-1].ts
+    return f"{len(candles)} candles were returned for this date, spanning {first.strftime('%H:%M')}-{last.strftime('%H:%M')} ET."
+
+
 def _detect_sweep(monitor_candles: list[Candle], range_high: float, range_low: float, tick_size: float):
     """Walk the 9:00-10:00 candles chronologically looking for the first
     breach-then-reclaim excursion on either side.
@@ -173,7 +186,10 @@ def run_day(ticker: str, day: date, candles: list[Candle], cfg: BacktestConfig) 
 
     range_candles = _slice(candles, windows.range_start, windows.range_end)
     if not range_candles:
-        return TradeRecord(date=day.isoformat(), ticker=ticker, outcome=DayOutcome.INSUFFICIENT_DATA, notes="No 1-minute data for the 8:00-9:00 ET range candle.")
+        return TradeRecord(
+            date=day.isoformat(), ticker=ticker, outcome=DayOutcome.INSUFFICIENT_DATA,
+            notes="No 1-minute data for the 8:00-9:00 ET range candle. " + _coverage_note(candles),
+        )
     range_high, range_low = _compute_range(range_candles)
     range_high, range_low = round_to_tick(range_high, cfg.tick_size), round_to_tick(range_low, cfg.tick_size)
 
@@ -184,7 +200,8 @@ def run_day(ticker: str, day: date, candles: list[Candle], cfg: BacktestConfig) 
     if not monitor_candles:
         return TradeRecord(
             date=day.isoformat(), ticker=ticker, outcome=DayOutcome.INSUFFICIENT_DATA,
-            range_high=range_high, range_low=range_low, notes="No 1-minute data for the 9:00-10:00 ET monitor window.",
+            range_high=range_high, range_low=range_low,
+            notes="No 1-minute data for the 9:00-10:00 ET monitor window. " + _coverage_note(candles),
         )
 
     direction, sweep_price, breach_time, reclaim_time = _detect_sweep(monitor_candles, range_high, range_low, cfg.tick_size)

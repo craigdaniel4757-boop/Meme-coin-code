@@ -217,3 +217,33 @@ def test_only_first_setup_of_the_day_is_considered():
     ] + [mk(t(DAY, 9, m), 100.0, 100.1, 99.9, 100.0) for m in range(4, 60)]
     direction, *_ = strategy._detect_sweep(monitor, range_high, range_low, TICK)
     assert direction == SweepDirection.BULLISH
+
+
+# ---------- insufficient-data diagnostics ----------
+
+
+def test_no_candles_at_all_reports_insufficient_data_with_clear_note():
+    record = run_day("RY.TO", DAY, [], BacktestConfig())
+    assert record.outcome == DayOutcome.INSUFFICIENT_DATA
+    assert "No candles at all were returned for this date." in record.notes
+
+
+def test_regular_session_only_data_distinguishes_from_total_absence():
+    """Mirrors a real-world gap: a provider with no pre-market coverage for
+    a given exchange/ticker returns plenty of candles, just none before
+    9:30 ET -- the note should say so, not just "no data", so it reads
+    differently from a provider that returned literally nothing."""
+    base = t(DAY, 9, 30)
+    candles = [mk(base + timedelta(minutes=m), 100.0, 100.1, 99.9, 100.0) for m in range(0, 60)]
+    record = run_day("RY.TO", DAY, candles, BacktestConfig())
+    assert record.outcome == DayOutcome.INSUFFICIENT_DATA
+    assert "No 1-minute data for the 8:00-9:00 ET range candle." in record.notes
+    assert "60 candles were returned for this date, spanning 09:30-10:29 ET." in record.notes
+
+
+def test_no_monitor_window_data_also_reports_coverage():
+    range_candles = [mk(t(DAY, 8, m), 100.0, 100.1, 99.9, 100.0) for m in range(0, 60)]
+    record = run_day("RY.TO", DAY, range_candles, BacktestConfig())
+    assert record.outcome == DayOutcome.INSUFFICIENT_DATA
+    assert "No 1-minute data for the 9:00-10:00 ET monitor window." in record.notes
+    assert "60 candles were returned for this date, spanning 08:00-08:59 ET." in record.notes
