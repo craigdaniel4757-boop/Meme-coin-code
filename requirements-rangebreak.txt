@@ -5,3 +5,9 @@
 fastapi>=0.110,<1.0
 uvicorn>=0.27,<1.0
 httpx>=0.27,<1.0
+
+## zoneinfo (stdlib, used for America/New_York session times) needs an IANA
+## timezone database. Linux/Mac usually have one at the OS level already;
+## Windows never does, so this is required there. Harmless everywhere else --
+## zoneinfo prefers the OS copy when one exists and only falls back to this.
+tzdata>=2024.1
