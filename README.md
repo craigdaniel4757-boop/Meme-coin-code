@@ -229,6 +229,134 @@ sizing/stop/ladder/circuit-breaker logic, paper execution bookkeeping,
 backtest metrics, and safety-filter gating — all against synthetic
 fixtures, with no network calls required.
 
+## Range Breakout Web App (stocks/ETFs)
+
+A second, completely independent website in this repo: `rangebreak/`. It
+has nothing to do with meme coins or `bot/` — it's a mechanical backtester
+and chart visualizer for an 8-9am ET opening-range liquidity-sweep strategy
+on stocks/ETFs, built around one specific rule set (see below) rather than
+the scoring/multi-strategy approach `bot/` uses. It never places an order,
+paper or live — it replays 1-minute candles against fixed rules and shows
+you, on an actual candlestick chart, exactly what would have happened.
+
+### Quick start
+
+```bash
+pip install -r requirements-rangebreak.txt
+python -m rangebreak
+```
+
+Open **http://127.0.0.1:8010**. Pick a ticker and date range, hit "Run
+backtest", then click any row in the results table to see that day's chart
+with the range box, sweep, entry, stop, and target all marked. Ships with
+zero setup using seeded synthetic demo data (see below); switch the "Data
+source" dropdown to Yahoo Finance for real prices once you're running
+somewhere with open outbound network access. Binds `127.0.0.1` by default,
+same local-only posture as `python -m bot web` — pass `--host`/`--port` to
+change it.
+
+### The strategy, exactly as implemented
+
+1. **Range**: the 1-hour candle from 08:00–09:00 **America/New_York**
+   (DST-correct — this is wall-clock ET year-round, not a fixed UTC
+   offset) sets `range_high`/`range_low`.
+2. **Sweep + reclaim, 09:00–10:00 ET**: walking 1-minute candles forward,
+   a *bullish* setup requires price to trade at least 1 tick below
+   `range_low` and then a later (or the same) candle to *close* back above
+   it; a *bearish* setup is the mirror image on `range_high`. Only the
+   first such breach of the day is considered — a second, opposite-side
+   breach later in the window is never a fallback candidate.
+3. **Validity**: the setup only counts if the 9:00–10:00 hour's *close*
+   (i.e. its last 1-minute bar) ends back inside `[range_low, range_high]`.
+   This is the one place the backtest deliberately looks past the moment a
+   trade might already have triggered — entry price/time/stop are decided
+   using only data available up to that point, but whether the day counts
+   as a trade at all isn't settled until 10:00, exactly as the spec asks
+   for. A live version of this exact rule would need to treat any signal
+   before 10:00 as provisional until the hour closes.
+4. **Pre-sweep swing point**: a 1-minute swing high/low is a candle whose
+   high (low) is strictly greater (less) than both immediate neighbors;
+   the engine uses the most recent one whose entire 3-candle pattern sits
+   before the breach candle.
+5. **Entry**: the first 1-minute candle *from the reclaim candle onward*
+   whose close breaks that swing point, entered at that candle's close.
+6. **Stop**: 1 tick beyond the most extreme price reached during the
+   breach→reclaim excursion (not re-extended by anything that happens
+   after reclaim, while waiting for the entry trigger).
+7. **Target**: the opposite side of the original 8–9am range.
+8. **Resolution**: whichever of stop/target is touched first, walking
+   forward on 1-minute bars; if a single bar's range spans both (which can
+   happen with 1-minute OHLC — there's no tick data to disambiguate), the
+   backtest conservatively assumes the stop was hit first. Neither hit by
+   the session-close cutoff (16:00 ET by default) exits at the last price
+   — recorded as an EOD exit, distinct from a target/stop.
+9. One trade attempt per day, maximum — whatever the first breach+reclaim
+   event resolves to (invalid, no swing, no entry trigger, or a trade)
+   *is* the day's outcome.
+
+Every day is recorded with (at minimum) date, ticker, range high/low,
+sweep direction/price, entry time/price, stop price, target price, exit
+time/price, result in R, and which of stop/target/EOD was reached first —
+`GET /api/backtest` returns the full set as JSON.
+
+### Cost model
+
+US equities/ETFs trade in $0.01 ticks by default (configurable, for the
+rare instrument that doesn't). Every fill is adjusted from the nominal
+trigger price: entry, a triggered stop, and an EOD close-out are all
+modeled as marketable orders that pay half the configured spread plus
+configured slippage against the position; the target is modeled as a
+resting limit order filled at its exact price. Commission is a flat
+$/share round-trip cost subtracted from realized P&L. All of it —
+tick size, spread, slippage, commission, and the session-close cutoff —
+is adjustable from the "Advanced" panel in the UI. Defaults are
+deliberately wider than a typical regular-hours estimate: the 8:00–10:00am
+ET window is mostly **pre-market** (regular session opens 9:30am ET),
+where liquidity is thinner and spreads wider for most names — lean on
+liquid ETFs/large caps and tighten the assumptions to match your own
+broker/instrument.
+
+### Data sources
+
+- **Synthetic demo data** (default): deterministic, seeded, clearly
+  fake — cycles through all seven mechanical outcomes (target, stop, EOD
+  is reachable too, invalid sweep, no sweep, no entry trigger, no prior
+  swing) so the whole app is explorable with zero setup and no API key.
+  Never presented as real prices for a real ticker.
+- **Yahoo Finance** (`source=yahoo`): real prices via Yahoo's public
+  intraday chart endpoint, no key required, fetched with
+  `includePrePost=true` since the strategy's window is largely pre-market.
+  Real limits worth knowing: 1-minute history only reliably covers roughly
+  the last 7-8 days, and it's an unofficial endpoint (no SLA). A request
+  it can't fulfill fails with a clear error rather than silently
+  substituting fake data. Swap in another provider (Polygon.io, Alpaca,
+  Twelve Data, …) by implementing `rangebreak/data/provider.py`'s
+  `MarketDataProvider` — nothing else depends on Yahoo specifically.
+
+### Testing
+
+```bash
+pip install -r requirements-rangebreak.txt -r requirements-dev.txt
+pytest tests/test_rangebreak_*.py
+```
+
+The strategy engine is tested two ways: whitebox unit tests hand-build
+specific candle sequences to pin down the trickiest mechanical edges (tick-
+exact breach boundaries, same-bar reclaim, a swing point tied with its
+neighbor, both stop and target touched in one bar), and end-to-end tests
+run the full engine against the synthetic generator's seven scripted
+scenarios and assert the expected outcome — all with no network calls.
+
+### Disclaimer
+
+This is a backtesting and visualization tool, not investment advice and
+not a live trading bot — there is no code path from it to a broker or
+exchange. A backtest, however carefully the costs are modeled, is not a
+guarantee of future results, and thin pre-market liquidity in particular
+can make real fills worse than any fixed slippage assumption captures.
+You are solely responsible for complying with the laws and regulations
+that apply to you.
+
 ## Disclaimer
 
 This software is provided for research and educational purposes. It is

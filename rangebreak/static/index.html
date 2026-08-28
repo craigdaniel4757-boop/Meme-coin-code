@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>rangebreak -- 8-9am ET opening-range sweep backtester</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <h1>rangebreak</h1>
+  <div class="sub">8:00-9:00am ET opening range &rarr; 9:00-10:00am liquidity sweep &rarr; 1-minute swing-break entry. Mechanical backtest &amp; chart visualizer for stocks/ETFs. Not financial advice -- research/education only.</div>
+
+  <div class="panel">
+    <h2>Backtest setup</h2>
+    <div class="controls">
+      <div class="field">
+        <label for="ticker">Ticker</label>
+        <input id="ticker" type="text" value="SPY" list="ticker-list">
+        <datalist id="ticker-list"></datalist>
+      </div>
+      <div class="field">
+        <label for="start">Start date</label>
+        <input id="start" type="date">
+      </div>
+      <div class="field">
+        <label for="end">End date</label>
+        <input id="end" type="date">
+      </div>
+      <div class="field">
+        <label for="source">Data source</label>
+        <select id="source">
+          <option value="synthetic" selected>Synthetic demo data</option>
+          <option value="yahoo">Yahoo Finance (live, needs network)</option>
+        </select>
+      </div>
+      <div class="field">
+        <button id="run-btn" type="button">Run backtest</button>
+      </div>
+    </div>
+
+    <details id="advanced">
+      <summary>Advanced: tick size, spread, slippage, commission, session close</summary>
+      <div class="adv-grid">
+        <div class="field"><label for="tick_size">Tick size ($)</label><input id="tick_size" type="number" step="0.0001" value="0.01"></div>
+        <div class="field"><label for="spread_ticks">Spread (ticks)</label><input id="spread_ticks" type="number" step="0.5" value="2"></div>
+        <div class="field"><label for="slippage_ticks">Slippage (ticks)</label><input id="slippage_ticks" type="number" step="0.5" value="2"></div>
+        <div class="field"><label for="commission_per_share">Commission ($/share, round-trip)</label><input id="commission_per_share" type="number" step="0.001" value="0"></div>
+        <div class="field"><label for="session_close">Session close (ET, HH:MM)</label><input id="session_close" type="text" value="16:00" style="width:70px"></div>
+        <div class="field"><label for="lookback_hours">Swing lookback buffer (hrs before 8am)</label><input id="lookback_hours" type="number" step="0.5" value="1"></div>
+      </div>
+    </details>
+
+    <div id="source-banner" class="banner">
+      Synthetic demo data: deterministic, seeded, clearly-labeled fake candles -- not real market history. Free to
+      explore with zero setup; every mechanical branch of the strategy (target/stop/EOD/invalid sweep/no sweep/no
+      entry trigger) is represented across enough days. Switch to Yahoo Finance for real prices.
+    </div>
+  </div>
+
+  <div id="error-box" class="error-box"></div>
+
+  <div id="summary-panel" class="panel" style="display:none">
+    <h2>Summary</h2>
+    <div class="stats">
+      <div class="card"><div class="label">Days analyzed</div><div class="value" id="s-days">-</div></div>
+      <div class="card"><div class="label">Trades taken</div><div class="value" id="s-trades">-</div></div>
+      <div class="card"><div class="label">Win rate</div><div class="value" id="s-winrate">-</div></div>
+      <div class="card"><div class="label">Avg R</div><div class="value" id="s-avgr">-</div></div>
+      <div class="card"><div class="label">Total R</div><div class="value" id="s-totalr">-</div></div>
+      <div class="card"><div class="label">Profit factor</div><div class="value" id="s-pf">-</div></div>
+      <div class="card"><div class="label">No sweep</div><div class="value neutral" id="s-nosweep">-</div></div>
+      <div class="card"><div class="label">Invalid sweep</div><div class="value warn" id="s-invalid">-</div></div>
+    </div>
+  </div>
+
+  <div id="results-panel" class="panel" style="display:none">
+    <h2>Daily results <span style="font-weight:400; text-transform:none; letter-spacing:0;">(click a row to view its chart)</span></h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th><th>Outcome</th><th>Dir</th><th>Range H</th><th>Range L</th>
+            <th>Sweep px</th><th>Entry time</th><th>Entry px</th><th>Stop</th><th>Target</th>
+            <th>Exit time</th><th>Exit px</th><th>R</th>
+          </tr>
+        </thead>
+        <tbody id="results-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="chart-panel" class="panel">
+    <h2>Day detail: <span id="chart-title">-</span></h2>
+    <div id="chart-legend"></div>
+    <div id="chart-container"></div>
+  </div>
+
+  <footer>
+    Backtest only -- this tool never places an order, paper or live; it replays historical (or synthetic demo)
+    1-minute candles against a fixed mechanical rule set and shows you what would have happened, including modeled
+    tick size, spread, slippage, and commission. The 8:00-10:00am ET window is largely <em>pre-market</em> for US
+    equities (regular session opens 9:30am ET) -- liquidity is thinner and spreads wider there than midday, which is
+    why the default cost assumptions are more conservative than a typical regular-hours estimate; adjust them to
+    match your own broker/instrument. Past performance, simulated or real, does not guarantee future results. Not
+    financial advice. See the "Range Breakout Web App" section of the repo README for the exact mechanical rules,
+    including the handful of judgment calls made to turn a natural-language strategy into deterministic code.
+  </footer>
+
+<script src="/static/vendor/lightweight-charts.standalone.production.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

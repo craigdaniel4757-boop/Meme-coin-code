@@ -1,0 +1,7 @@
+## Only needed for the range-breakout backtester website (`python -m rangebreak`).
+## Fully independent of requirements.txt / requirements-web.txt (the meme-coin bot) --
+## this app shares no code or dependencies with that one beyond the pytest dev setup.
+
+fastapi>=0.110,<1.0
+uvicorn>=0.27,<1.0
+httpx>=0.27,<1.0
