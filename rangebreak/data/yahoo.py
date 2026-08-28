@@ -25,6 +25,7 @@ specifically.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 import httpx
@@ -60,14 +61,24 @@ class YahooProvider(MarketDataProvider):
             "includePrePost": "true",
             "events": "none",
         }
-        headers = {"User-Agent": "Mozilla/5.0 (compatible; rangebreak-backtester/1.0)"}
+        headers = {"User-Agent": "Mozilla/5.0 (compatible; rangebreak-backtester/1.0)", "Accept": "application/json"}
         url = _BASE_URL.format(symbol=ticker.upper())
         try:
             resp = httpx.get(url, params=params, headers=headers, timeout=self._timeout)
             resp.raise_for_status()
-            payload = resp.json()
         except httpx.HTTPError as exc:
             raise YahooDataError(f"Could not reach Yahoo Finance for {ticker}: {exc}") from exc
+        try:
+            payload = resp.json()
+        except (json.JSONDecodeError, ValueError) as exc:
+            # A 200 with a non-JSON body (an HTML consent/rate-limit page, most often) means
+            # Yahoo served something other than data -- report that plainly instead of crashing
+            # on a malformed-response 500.
+            snippet = resp.text[:200].replace("\n", " ")
+            raise YahooDataError(
+                f"Yahoo Finance returned a non-JSON response for {ticker} (likely a rate-limit or "
+                f"block page rather than data). First 200 chars: {snippet!r}"
+            ) from exc
 
         chart = payload.get("chart", {})
         if chart.get("error"):

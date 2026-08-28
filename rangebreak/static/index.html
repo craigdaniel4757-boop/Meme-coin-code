@@ -70,6 +70,12 @@
       <div class="card"><div class="label">Profit factor</div><div class="value" id="s-pf">-</div></div>
       <div class="card"><div class="label">No sweep</div><div class="value neutral" id="s-nosweep">-</div></div>
       <div class="card"><div class="label">Invalid sweep</div><div class="value warn" id="s-invalid">-</div></div>
+      <div class="card"><div class="label">Insufficient data</div><div class="value warn" id="s-nodata">-</div></div>
+    </div>
+    <div id="nodata-warning" class="banner" style="display:none; margin-top:12px;">
+      Every (or nearly every) day came back with no usable market data. That almost always means the data source
+      isn't returning candles for this ticker/date range at all -- click any "No data" row below and check the note
+      that appears under the chart panel for the specific reason.
     </div>
   </div>
 
@@ -81,7 +87,7 @@
           <tr>
             <th>Date</th><th>Outcome</th><th>Dir</th><th>Range H</th><th>Range L</th>
             <th>Sweep px</th><th>Entry time</th><th>Entry px</th><th>Stop</th><th>Target</th>
-            <th>Exit time</th><th>Exit px</th><th>R</th>
+            <th>Exit time</th><th>Exit px</th><th>R</th><th>Notes</th>
           </tr>
         </thead>
         <tbody id="results-body"></tbody>

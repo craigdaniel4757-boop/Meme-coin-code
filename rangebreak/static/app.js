@@ -155,6 +155,12 @@
     }
   }
 
+  function escapeHtml(s) {
+    const div = document.createElement("div");
+    div.textContent = s || "";
+    return div.innerHTML;
+  }
+
   function renderSummary(s) {
     $("s-days").textContent = s.days_analyzed;
     $("s-trades").textContent = s.trades_taken;
@@ -168,13 +174,17 @@
     $("s-pf").textContent = s.profit_factor === null ? "-" : s.profit_factor > 1e6 ? "∞" : s.profit_factor.toFixed(2);
     $("s-nosweep").textContent = s.no_sweep_days;
     $("s-invalid").textContent = s.invalid_sweep_days;
+    $("s-nodata").textContent = s.insufficient_data_days;
+
+    const warn = $("nodata-warning");
+    warn.style.display = s.days_analyzed > 0 && s.insufficient_data_days / s.days_analyzed >= 0.8 ? "block" : "none";
   }
 
   function renderTable(days) {
     const body = $("results-body");
     body.innerHTML = "";
     if (!days.length) {
-      body.innerHTML = '<tr><td colspan="13" class="empty">No trading days in range.</td></tr>';
+      body.innerHTML = '<tr><td colspan="14" class="empty">No trading days in range.</td></tr>';
       return;
     }
     for (const d of days) {
@@ -194,7 +204,8 @@
         "<td>" + fmtPx(d.target_price) + "</td>" +
         "<td>" + etTime(d.exit_time) + "</td>" +
         "<td>" + fmtPx(d.exit_price) + "</td>" +
-        '<td class="' + signClass(d.result_r) + '">' + fmtR(d.result_r) + "</td>";
+        '<td class="' + signClass(d.result_r) + '">' + fmtR(d.result_r) + "</td>" +
+        '<td style="white-space:normal; max-width:260px; color:var(--dim); font-size:11.5px;">' + escapeHtml(d.notes) + "</td>";
       tr.addEventListener("click", () => selectDay(d.date, tr));
       body.appendChild(tr);
     }
