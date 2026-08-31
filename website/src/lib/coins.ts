@@ -22,6 +22,11 @@ export const WATCHLIST: WatchlistEntry[] = [
   { query: 'MYRO', color: '#e0e0e0' },
   { query: 'GIGA', color: '#27ae60' },
   { query: 'PENGU', color: '#9b51e0' },
+  { query: 'FWOG', color: '#84cc16' },
+  { query: 'WEN', color: '#facc15' },
+  { query: 'SLERF', color: '#f472b6' },
+  { query: 'MOODENG', color: '#fb923c' },
+  { query: 'ACT', color: '#38bdf8' },
   // Reference asset only, for the solRegime feature -- never traded.
   { query: 'SOL', color: '#9945ff', tradeable: false },
 ];

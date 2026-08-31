@@ -2,13 +2,15 @@ import { AgentWeights } from '../types';
 import { FEATURE_KEYS, FEATURE_LABELS, averageLinearEntryWeights } from '../lib/agent';
 import { Stats } from '../lib/stats';
 import { formatPct } from '../lib/format';
+import { MIN_HELD_OUT_FOR_SIGNAL } from '../lib/simulation';
 
 interface Props {
   agent: AgentWeights;
   stats: Stats;
+  sizingFactor: number;
 }
 
-export function BrainPanel({ agent, stats }: Props) {
+export function BrainPanel({ agent, stats, sizingFactor }: Props) {
   const avgWeights = averageLinearEntryWeights(agent);
   const rows = avgWeights
     ? FEATURE_KEYS.filter((k) => k !== 'bias').map((k) => ({ key: k, label: FEATURE_LABELS[k], weight: avgWeights[k] }))
@@ -61,6 +63,18 @@ export function BrainPanel({ agent, stats }: Props) {
             <span className="text-slate-500 text-[10px]"> n={stats.heldOut.trades}</span>
           </div>
         </div>
+      </div>
+
+      <div
+        className="text-xs text-slate-400 mb-4"
+        title="New position sizes are multiplied by this -- shrinks after a run of losing held-out trades, sizes up after a run of winning ones, neutral until there's enough held-out history to judge."
+      >
+        Position sizing is currently at{' '}
+        <span className={sizingFactor >= 1 ? 'text-up' : sizingFactor < 0.65 ? 'text-down' : 'text-slate-300'}>
+          {Math.round(sizingFactor * 100)}%
+        </span>{' '}
+        of baseline, driven by recent held-out results
+        {stats.heldOut.trades < MIN_HELD_OUT_FOR_SIGNAL ? ' (not enough yet to matter)' : ''}.
       </div>
 
       <div className="text-xs text-slate-400 mb-2">

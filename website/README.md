@@ -17,7 +17,7 @@ disclaimer in the page footer, and the honest self-assessment below.
 
 - **A live Solana meme coin market** (`src/lib/dexscreener.ts`,
   `src/lib/marketData.ts`) — every ~20 seconds, the browser queries
-  DexScreener's public search API directly for a watchlist of well-known
+  DexScreener's public search API directly for a watchlist of 15 well-known
   meme coin tickers plus SOL itself as a market-regime reference
   (`src/lib/coins.ts`), keeps only `chainId: "solana"` results above a
   liquidity floor, and picks the highest-liquidity pair per symbol. No
@@ -57,13 +57,20 @@ disclaimer in the page footer, and the honest self-assessment below.
   of `scripts/pretrain.ts` for exactly what it approximates and why (no
   historical buy/sell counts exist in OHLCV data, liquidity is held at its
   current value through the replay, etc.) — it's a real backtest-style
-  warm start, not magic.
+  warm start, not magic. `.github/workflows/pretrain.yml` reruns this
+  weekly (plus an on-demand "Run workflow" button) and commits the
+  refreshed weights automatically, so the starting point doesn't go stale
+  as meme coin regimes drift — note that GitHub only fires `schedule`
+  triggers for workflow files living on the repo's default branch, so the
+  weekly run won't actually fire until this is merged there.
 - **Hard risk controls independent of the learned policy** — a per-trade
   stop-loss, a max concurrent position cap, and a max hold time — so a bad
   stretch of learning can't wipe the account in one trade. Position size
-  also scales down for thin liquidity, and the simulated swap fee includes
-  a slippage estimate that grows with trade-size-vs-liquidity, so trading
-  an illiquid meme coin costs more here too, same as it would for real.
+  also scales down for thin liquidity and up or down with whether *held-out*
+  trades have actually been winning lately (not just confidence/experience),
+  and the simulated swap fee includes a slippage estimate that grows with
+  trade-size-vs-liquidity — so both an unproven model and an illiquid meme
+  coin cost more to trade here, same as they would for real.
 - **A live dashboard** — equity curve, per-coin sparklines linking out to
   each pair's real DexScreener page, a "brain" panel showing the ensemble's
   composition, training-vs-held-out win rate, and which features the linear

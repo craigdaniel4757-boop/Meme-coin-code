@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useSimulation } from './hooks/useSimulation';
 import { computeStats } from './lib/stats';
-import { computeEquity, MAX_POSITIONS } from './lib/simulation';
+import { computeEquity, MAX_POSITIONS, performanceFactor } from './lib/simulation';
 import { Header } from './components/Header';
 import { EquityChart } from './components/EquityChart';
 import { CoinGrid } from './components/CoinGrid';
@@ -19,6 +19,7 @@ export default function App() {
     [state.coins, state.cash, state.positions],
   );
   const stats = useMemo(() => computeStats(state.events), [state.events]);
+  const sizingFactor = useMemo(() => performanceFactor(state.events), [state.events]);
   const totalReturnPct = (equity - 1000) / 1000;
   const openPositions = Object.keys(state.positions).length;
 
@@ -46,7 +47,7 @@ export default function App() {
           <CoinGrid coins={state.coins} positions={state.positions} />
         </div>
         <div className="flex flex-col gap-5 min-w-0">
-          <BrainPanel agent={state.agent} stats={stats} />
+          <BrainPanel agent={state.agent} stats={stats} sizingFactor={sizingFactor} />
           <TradeFeed events={state.events} />
         </div>
       </main>

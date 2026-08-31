@@ -18,6 +18,8 @@ export const FULL_SIZE_LIQUIDITY_USD = 150_000;
 // unbiased read on the ensemble's *current* skill rather than a number
 // the ensemble was fit to. See lib/stats.ts for how this is reported.
 export const EVAL_FRACTION = 0.15;
+export const PERFORMANCE_WINDOW = 20;
+export const MIN_HELD_OUT_FOR_SIGNAL = 5;
 
 const EQUITY_CAP = 600;
 export const EVENT_LOG_CAP = 500;
@@ -79,6 +81,23 @@ function pushEvent(events: FeedEvent[], event: FeedEvent): void {
   if (events.length > EVENT_LOG_CAP) events.length = EVENT_LOG_CAP;
 }
 
+// Scales position size by whether the *unbiased* held-out trades have
+// actually been making money lately -- not confidence, not experience,
+// the real thing: recent realized P&L on trades the model never got to
+// learn from. Neutral (1x) until there's enough held-out history to say
+// anything; before that this factor shouldn't make new users' sizing any
+// more cautious than it already was. Once there's signal, a positive
+// recent edge sizes up (modestly, capped well short of doubling), a
+// negative one shrinks toward the floor -- so realized results improve
+// over time by trading less during demonstrably bad stretches, even on
+// sessions where the underlying prediction accuracy never gets better.
+export function performanceFactor(events: FeedEvent[]): number {
+  const recentHeldOut = events.filter((e) => e.kind === 'close' && e.isEval).slice(0, PERFORMANCE_WINDOW);
+  if (recentHeldOut.length < MIN_HELD_OUT_FOR_SIGNAL) return 1;
+  const avgPnlPct = recentHeldOut.reduce((s, e) => s + (e.pnlPct ?? 0), 0) / recentHeldOut.length;
+  return clamp(0.65 + avgPnlPct * 4, 0.3, 1.2);
+}
+
 // Approximates real DEX swap cost: a flat base fee plus a slippage
 // estimate that grows with how large the trade is relative to the pool's
 // liquidity -- trading a thin pool costs meaningfully more than trading a
@@ -102,6 +121,7 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
 
   const coinById = new Map(coins.map((c) => [c.id, c]));
   const context = computeContext(coins);
+  const perf = performanceFactor(prev.events);
 
   function closeTrade(coin: Coin, pos: Position, reasoning: string, confidence: number): void {
     const grossProceeds = pos.quantity * coin.price;
@@ -173,16 +193,21 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
       .slice(0, slots);
 
     // Position size scales with signal confidence, the model's overall
-    // experience, and this pair's liquidity depth -- small, cautious bets
-    // on illiquid or unproven setups, sizing up toward the full 22%-of-
-    // equity risk budget for liquid pairs once the model has a track record.
+    // experience, this pair's liquidity depth, and -- via `perf` -- whether
+    // the unbiased held-out trades have actually been winning lately.
+    // Small, cautious bets on illiquid, unproven, or currently-underperforming
+    // setups; full size only once the model has both a track record and a
+    // recent real edge to back it up.
     const experienceFactor = Math.min(1, 0.4 + agent.updates / 50);
 
     for (const { coin, d } of candidates) {
       const equity = computeEquity(coins, cash, positions);
       const confidenceFactor = 0.6 + 0.4 * d.confidence;
       const liquidityFactor = Math.max(0.3, Math.min(1, coin.liquidityUsd / FULL_SIZE_LIQUIDITY_USD));
-      const targetSize = Math.min(cash * 0.9, equity * 0.22 * experienceFactor * confidenceFactor * liquidityFactor);
+      const targetSize = Math.min(
+        cash * 0.9,
+        equity * 0.22 * experienceFactor * confidenceFactor * liquidityFactor * perf,
+      );
       if (targetSize < 10) continue;
 
       const feeRate = estimatedFeeRate(targetSize, coin.liquidityUsd);
