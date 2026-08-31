@@ -15,6 +15,13 @@ model, indicator set, or backtest result changes that. This project gives
 you tooling to apply discipline and data to a fundamentally high-risk
 activity — it does not, and cannot, guarantee profit.
 
+> **Looking for the browser demo instead?** [`website/`](website/) is a
+> separate, self-contained web app: an AI agent that paper-trades a basket
+> of *fictional* meme coins starting from a simulated $1,000 balance,
+> entirely in your browser (no backend, no real market data, no real
+> funds). It shares no code with memebot below — see
+> [`website/README.md`](website/README.md).
+
 ## What it actually does
 
 1. **Discovers candidates** — pulls DexScreener's latest/top boosted
