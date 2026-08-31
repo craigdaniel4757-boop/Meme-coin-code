@@ -1,0 +1,5 @@
+{
+  "pretrained": false,
+  "note": "Run `npm run pretrain` (needs network access to DexScreener and GeckoTerminal) to replace this placeholder with an ensemble actually trained on real historical Solana meme coin candles. Until then, the app falls back to the hand-picked technical-analysis prior with random noise, same as before pretraining existed.",
+  "agent": null
+}

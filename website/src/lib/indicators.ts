@@ -1,4 +1,4 @@
-import { Coin, Features } from '../types';
+import { Coin, FeatureContext, Features } from '../types';
 
 function clamp(v: number, lo: number, hi: number): number {
   return Math.max(lo, Math.min(hi, v));
@@ -40,12 +40,26 @@ function sma(history: number[], window: number): number {
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 
-// Momentum (chg5m/chg1h/chg6h) and buy/sell pressure come straight from
-// DexScreener's own windowed stats -- real, exchange-reported numbers.
-// Volatility, RSI, and distance-from-average are computed from the price
-// samples this browser session has actually observed (one per poll), so
-// they start neutral and sharpen as more polls come in.
-export function computeFeatures(coin: Coin, unrealizedPct: number): Features {
+function ageInDays(pairCreatedAt: number | null, now: number): number {
+  if (!pairCreatedAt) return 60; // unknown age -- treat as "established" rather than penalize
+  return Math.max(0, (now - pairCreatedAt) / 86_400_000);
+}
+
+export const NEUTRAL_CONTEXT: FeatureContext = { solChg1h: 0, avgChg1h: 0 };
+
+// Momentum (chg5m/chg1h/chg6h), buy/sell pressure, volume trend, and token
+// age come straight from DexScreener's own windowed stats -- real,
+// exchange-reported numbers. Volatility, RSI, and distance-from-average
+// are computed from the price samples this browser session has actually
+// observed (one per poll), so they start neutral and sharpen as more
+// polls come in. solRegime/relStrength come from `context`, computed once
+// per tick across the whole watchlist (see lib/simulation.ts).
+export function computeFeatures(
+  coin: Coin,
+  unrealizedPct: number,
+  context: FeatureContext = NEUTRAL_CONTEXT,
+  now: number = Date.now(),
+): Features {
   const volatility = clamp(stdDevReturns(coin.history, 20) * 10, 0, 1);
   const rsiVal = (rsi(coin.history) - 50) / 50;
   const smaVal = sma(coin.history, 20);
@@ -54,14 +68,27 @@ export function computeFeatures(coin: Coin, unrealizedPct: number): Features {
   const totalTxns1h = coin.buys1h + coin.sells1h;
   const buyPressure = totalTxns1h > 0 ? clamp((coin.buys1h - coin.sells1h) / totalTxns1h, -1, 1) : 0;
 
+  const expectedHourlyVolume = coin.volumeH24 / 24;
+  const volTrend =
+    expectedHourlyVolume > 0 ? clamp((coin.volumeH1 / expectedHourlyVolume - 1) / 3, -1, 1) : 0;
+
+  const tokenAge = clamp(ageInDays(coin.pairCreatedAt, now) / 60, 0, 1);
+
+  const chg1h = clamp(coin.priceChange.h1 / 100, -1, 1);
+  const relStrength = clamp(chg1h - context.avgChg1h, -1, 1);
+
   return {
     chg5m: clamp(coin.priceChange.m5 / 100, -1, 1),
-    chg1h: clamp(coin.priceChange.h1 / 100, -1, 1),
+    chg1h,
     chg6h: clamp(coin.priceChange.h6 / 100, -1, 1),
     volatility,
     rsi: rsiVal,
     smaDist,
     buyPressure,
+    volTrend,
+    tokenAge,
+    solRegime: clamp(context.solChg1h, -1, 1),
+    relStrength,
     unrealized: clamp(unrealizedPct, -1, 1),
     bias: 1,
   };

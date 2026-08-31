@@ -1,7 +1,8 @@
-import { Coin, CoinId, FeedEvent, Position, SimState } from '../types';
+import { Coin, CoinId, FeatureContext, FeedEvent, Position, SimState } from '../types';
 import { computeFeatures } from './indicators';
-import { createAgent, decide, learn, nextEpsilon, nextLearningRate } from './agent';
+import { createAgent, decide, learnFromTrade } from './agent';
 import { explainEntry, explainExit, explainMaxHold, explainStop } from './reasoning';
+import { TRADEABLE_WATCHLIST } from './coins';
 
 export const STARTING_CASH = 1000;
 export const MAX_POSITIONS = 4;
@@ -13,14 +14,24 @@ export const MAX_HOLD_TICKS = 180; // ~1 hour at the 20s poll cadence
 export const ENTRY_THRESHOLD = 0.62;
 export const EXIT_THRESHOLD = 0.58;
 export const FULL_SIZE_LIQUIDITY_USD = 150_000;
+// Fraction of new entries held out from learning, so their outcomes are an
+// unbiased read on the ensemble's *current* skill rather than a number
+// the ensemble was fit to. See lib/stats.ts for how this is reported.
+export const EVAL_FRACTION = 0.15;
 
 const EQUITY_CAP = 600;
-const EVENT_LOG_CAP = 150;
+export const EVENT_LOG_CAP = 500;
+
+const TRADEABLE_IDS = new Set(TRADEABLE_WATCHLIST.map((w) => w.query));
 
 let eventCounter = 0;
 function nextEventId(): string {
   eventCounter += 1;
   return `e${eventCounter}`;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.max(lo, Math.min(hi, v));
 }
 
 export function computeEquity(coins: Coin[], cash: number, positions: Record<CoinId, Position>): number {
@@ -32,6 +43,22 @@ export function computeEquity(coins: Coin[], cash: number, positions: Record<Coi
     if (coin) total += pos.quantity * coin.price;
   }
   return total;
+}
+
+// SOL's own momentum (market-wide regime) and the tradeable watchlist's
+// average 1h move (so a coin's strength can be judged relative to the
+// rest of the market, not just in isolation) -- computed once per tick.
+export function computeContext(coins: Coin[]): FeatureContext {
+  const sol = coins.find((c) => c.id === 'SOL');
+  const solChg1h = sol ? clamp(sol.priceChange.h1 / 100, -1, 1) : 0;
+
+  const tradeable = coins.filter((c) => TRADEABLE_IDS.has(c.id) && !c.stale);
+  const avgChg1h =
+    tradeable.length > 0
+      ? tradeable.reduce((s, c) => s + clamp(c.priceChange.h1 / 100, -1, 1), 0) / tradeable.length
+      : 0;
+
+  return { solChg1h, avgChg1h };
 }
 
 export function createInitialState(): SimState {
@@ -74,6 +101,7 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
   let totalFeesPaid = prev.totalFeesPaid;
 
   const coinById = new Map(coins.map((c) => [c.id, c]));
+  const context = computeContext(coins);
 
   function closeTrade(coin: Coin, pos: Position, reasoning: string, confidence: number): void {
     const grossProceeds = pos.quantity * coin.price;
@@ -87,15 +115,10 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
     const pnlPct = pnlUsd / pos.costBasis;
     delete positions[coin.id];
 
-    const exitFeatures = computeFeatures(coin, pnlPct);
-    const updates = agent.updates + 1;
-    agent = {
-      entry: learn(agent.entry, pos.entryFeatures, pnlPct, agent.learningRate),
-      exit: learn(agent.exit, exitFeatures, pnlPct, agent.learningRate),
-      updates,
-      epsilon: nextEpsilon(updates),
-      learningRate: nextLearningRate(updates),
-    };
+    if (!pos.isEval) {
+      const exitFeatures = computeFeatures(coin, pnlPct, context);
+      agent = learnFromTrade(agent, pos.entryFeatures, exitFeatures, pnlPct);
+    }
 
     pushEvent(events, {
       id: nextEventId(),
@@ -108,6 +131,7 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
       pnlUsd,
       pnlPct,
       win: pnlPct >= 0,
+      isEval: pos.isEval,
     });
   }
 
@@ -129,21 +153,21 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
     }
     if (coin.stale) continue; // don't let the learned policy act on a stale snapshot
 
-    const features = computeFeatures(coin, unrealizedPct);
-    const d = decide(agent.exit, features, agent.epsilon);
+    const features = computeFeatures(coin, unrealizedPct, context);
+    const d = decide(agent.members, 'exit', features, agent.epsilon);
     const shouldExit = d.explore ? Math.random() < 0.12 : d.probability > EXIT_THRESHOLD;
     if (shouldExit) {
       closeTrade(coin, pos, explainExit(d.dominant, coin.ticker, unrealizedPct), d.confidence);
     }
   }
 
-  // 2. Look for new entries among coins the bot isn't currently holding.
+  // 2. Look for new entries among tradeable coins the bot isn't currently holding.
   const openCount = Object.keys(positions).length;
   const slots = MAX_POSITIONS - openCount;
   if (slots > 0 && cash > 15) {
     const candidates = coins
-      .filter((coin) => !positions[coin.id] && !coin.stale)
-      .map((coin) => ({ coin, d: decide(agent.entry, computeFeatures(coin, 0), agent.epsilon) }))
+      .filter((coin) => TRADEABLE_IDS.has(coin.id) && !positions[coin.id] && !coin.stale)
+      .map((coin) => ({ coin, d: decide(agent.members, 'entry', computeFeatures(coin, 0, context), agent.epsilon) }))
       .filter(({ d }) => (d.explore ? Math.random() < 0.3 : d.probability > ENTRY_THRESHOLD))
       .sort((a, b) => b.d.probability - a.d.probability)
       .slice(0, slots);
@@ -168,7 +192,8 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
 
       cash -= targetSize;
       totalFeesPaid += fee;
-      const entryFeatures = computeFeatures(coin, 0);
+      const entryFeatures = computeFeatures(coin, 0, context);
+      const isEval = Math.random() < EVAL_FRACTION;
       positions[coin.id] = {
         coinId: coin.id,
         entryPrice: coin.price,
@@ -178,6 +203,7 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
         entryFeatures,
         entryConfidence: d.confidence,
         costBasis: targetSize,
+        isEval,
       };
 
       pushEvent(events, {
@@ -188,6 +214,7 @@ export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
         time: Date.now(),
         reasoning: explainEntry(d.dominant, coin.ticker, d.confidence),
         confidence: d.confidence,
+        isEval,
       });
     }
   }

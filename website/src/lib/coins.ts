@@ -1,6 +1,10 @@
 export interface WatchlistEntry {
   query: string;
   color: string;
+  // false = fetched and tracked like any other coin, but never traded and
+  // never shown in the market grid -- used for SOL as a market-regime
+  // reference only. Defaults to true (tradeable) when omitted.
+  tradeable?: boolean;
 }
 
 // Search seeds for well-known, established, liquid Solana meme coins.
@@ -18,4 +22,8 @@ export const WATCHLIST: WatchlistEntry[] = [
   { query: 'MYRO', color: '#e0e0e0' },
   { query: 'GIGA', color: '#27ae60' },
   { query: 'PENGU', color: '#9b51e0' },
+  // Reference asset only, for the solRegime feature -- never traded.
+  { query: 'SOL', color: '#9945ff', tradeable: false },
 ];
+
+export const TRADEABLE_WATCHLIST = WATCHLIST.filter((w) => w.tradeable !== false);

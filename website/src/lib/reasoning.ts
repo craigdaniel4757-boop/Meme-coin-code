@@ -9,6 +9,10 @@ const ENTRY_PHRASES: Partial<Record<FeatureKey, string[]>> = {
   rsi: ['RSI curling up out of oversold'],
   smaDist: ['price reclaiming its moving average'],
   buyPressure: ['buyers clearly outnumbering sellers this hour'],
+  volTrend: ['hourly volume running well above its normal pace'],
+  tokenAge: ['a track record as an established coin'],
+  solRegime: ['SOL itself holding up well'],
+  relStrength: ['outperforming the rest of the watchlist right now'],
   bias: ['a pattern that has matched past winners'],
   unrealized: ['favorable position momentum'],
 };
@@ -21,6 +25,10 @@ const EXIT_PHRASES: Partial<Record<FeatureKey, string[]>> = {
   rsi: ['RSI hitting overbought extremes'],
   smaDist: ['price stretched too far from its average'],
   buyPressure: ['sell pressure building this hour'],
+  volTrend: ['volume drying up'],
+  tokenAge: ['this being a newer, less-proven coin'],
+  solRegime: ['SOL itself turning weak'],
+  relStrength: ['lagging the rest of the watchlist'],
   unrealized: ['the open profit/loss on the position'],
   bias: ['accumulated experience with this setup'],
 };

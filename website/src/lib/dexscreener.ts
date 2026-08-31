@@ -18,10 +18,12 @@ export interface RawPair {
   baseToken?: { address?: string; name?: string; symbol?: string };
   priceUsd?: string;
   txns?: { m5?: RawTxnWindow; h1?: RawTxnWindow; h6?: RawTxnWindow; h24?: RawTxnWindow };
+  volume?: { m5?: number; h1?: number; h6?: number; h24?: number };
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   liquidity?: { usd?: number };
   fdv?: number;
   marketCap?: number;
+  pairCreatedAt?: number;
 }
 
 interface SearchResponse {

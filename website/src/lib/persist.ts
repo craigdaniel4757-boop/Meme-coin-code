@@ -1,18 +1,21 @@
 import { AgentWeights, SimState } from '../types';
 
 // v2: switched from a synthetic fictional-coin market to real DexScreener
-// data, which changed the Coin and Features shapes -- bumped so any v1
-// state from before that change is cleanly ignored instead of partially
-// loaded (e.g. an old Features object missing the new `chg5m` key).
-const STATE_KEY = 'mememind/state/v2';
-const BRAIN_KEY = 'mememind/brain/v2';
+// data, which changed the Coin and Features shapes.
+// v3: single entry/exit AgentWeights replaced by an ensemble of members
+// (`agent.members[]`), plus four new features. Bumped again so older
+// saves are cleanly ignored instead of partially loaded.
+const STATE_KEY = 'mememind/state/v3';
+const BRAIN_KEY = 'mememind/brain/v3';
 
 function isSimState(value: unknown): value is SimState {
   if (!value || typeof value !== 'object') return false;
   const v = value as Record<string, unknown>;
   if (typeof v.tick !== 'number' || !Array.isArray(v.coins) || !v.agent || typeof v.agent !== 'object') return false;
-  const entry = (v.agent as Record<string, unknown>).entry;
-  return !!entry && typeof (entry as Record<string, unknown>).chg5m === 'number';
+  const members = (v.agent as Record<string, unknown>).members;
+  if (!Array.isArray(members) || members.length === 0) return false;
+  const first = members[0] as Record<string, unknown>;
+  return (first.kind === 'linear' || first.kind === 'neural') && !!first.entry;
 }
 
 export function saveState(state: SimState): void {
@@ -58,5 +61,13 @@ export function loadBrain(): AgentWeights | null {
     return JSON.parse(raw) as AgentWeights;
   } catch {
     return null;
+  }
+}
+
+export function clearBrain(): void {
+  try {
+    localStorage.removeItem(BRAIN_KEY);
+  } catch {
+    // ignore
   }
 }

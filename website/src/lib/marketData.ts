@@ -36,6 +36,9 @@ function coinFromPair(entry: WatchlistEntry, pair: RawPair, now: number): Coin {
     priceChange: toPriceChange(pair),
     buys1h: pair.txns?.h1?.buys ?? 0,
     sells1h: pair.txns?.h1?.sells ?? 0,
+    volumeH1: pair.volume?.h1 ?? 0,
+    volumeH24: pair.volume?.h24 ?? 0,
+    pairCreatedAt: pair.pairCreatedAt ?? null,
     lastUpdated: now,
     stale: false,
   };
@@ -81,6 +84,9 @@ export function mergeMarketUpdate(
         priceChange: toPriceChange(pair),
         buys1h: pair.txns?.h1?.buys ?? 0,
         sells1h: pair.txns?.h1?.sells ?? 0,
+        volumeH1: pair.volume?.h1 ?? 0,
+        volumeH24: pair.volume?.h24 ?? 0,
+        pairCreatedAt: pair.pairCreatedAt ?? prev.pairCreatedAt,
         lastUpdated: now,
         stale: false,
       });

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { SimState } from '../types';
-import { createInitialState, stepDecisions } from '../lib/simulation';
+import { FeedEvent, SimState } from '../types';
+import { createInitialState, EVENT_LOG_CAP, stepDecisions } from '../lib/simulation';
 import { mergeMarketUpdate } from '../lib/marketData';
 import { fetchWatchlist } from '../lib/dexscreener';
 import { WATCHLIST } from '../lib/coins';
-import { clearState, loadBrain, loadState, saveBrain, saveState } from '../lib/persist';
+import { clearBrain, clearState, loadBrain, loadState, saveBrain, saveState } from '../lib/persist';
 
 export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting';
 
@@ -59,14 +59,33 @@ export function useSimulation() {
 
   const fullReset = useCallback(() => {
     clearState();
+    clearBrain();
     setState(createInitialState());
     poll();
   }, [poll]);
 
+  // Fresh $1,000, fresh positions -- but the AI's learned weights *and*
+  // its trade history both carry over, marked with a boundary event, so
+  // performance stats keep accumulating sample size across many resets
+  // instead of getting wiped back to near-zero every time.
   const softReset = useCallback(() => {
     const fresh = createInitialState();
     const brain = loadBrain() ?? stateRef.current.agent;
-    const next = { ...fresh, agent: brain, coins: stateRef.current.coins };
+    const marker: FeedEvent = {
+      id: `reset-${Date.now()}`,
+      kind: 'reset',
+      coinId: '',
+      ticker: '',
+      time: Date.now(),
+      reasoning: 'New $1,000 portfolio started. The brain and trade history above carried over.',
+      confidence: 0,
+    };
+    const next: SimState = {
+      ...fresh,
+      agent: brain,
+      coins: stateRef.current.coins,
+      events: [marker, ...stateRef.current.events].slice(0, EVENT_LOG_CAP),
+    };
     saveState(next);
     setState(next);
   }, []);
