@@ -18,6 +18,11 @@ export function formatPrice(value: number): string {
   return '$' + value.toFixed(decimals);
 }
 
+export function formatCompactUsd(value: number): string {
+  if (!isFinite(value) || value <= 0) return '$0';
+  return '$' + new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+}
+
 export function formatPct(value: number, withSign = true): string {
   const pct = value * 100;
   const sign = withSign && pct >= 0 ? '+' : '';

@@ -1,54 +1,54 @@
 import { AgentWeights, Features, FeatureKey } from '../types';
 
 export const FEATURE_KEYS: FeatureKey[] = [
-  'mom3',
-  'mom10',
-  'mom30',
+  'chg5m',
+  'chg1h',
+  'chg6h',
   'volatility',
   'rsi',
   'smaDist',
-  'volumeZ',
+  'buyPressure',
   'unrealized',
   'bias',
 ];
 
 export const FEATURE_LABELS: Record<FeatureKey, string> = {
-  mom3: 'Short-term momentum',
-  mom10: 'Medium-term momentum',
-  mom30: 'Long-term momentum',
+  chg5m: '5-minute change',
+  chg1h: '1-hour change',
+  chg6h: '6-hour change',
   volatility: 'Volatility',
   rsi: 'RSI extremity',
   smaDist: 'Distance from average',
-  volumeZ: 'Volume surge',
+  buyPressure: 'Buy/sell pressure',
   unrealized: 'Open position P&L',
   bias: 'Base instinct',
 };
 
 // Warm-start priors: basic, textbook technical-analysis intuition (favor
-// momentum + volume confirmation on entry, favor overbought/fading-momentum
-// on exit) so the bot isn't trading on pure noise before it has closed a
-// single trade. From here every weight is still fully overwritten by
-// `learn()` after every close -- this is a starting point, not a script.
+// momentum + buy-pressure confirmation on entry, favor overbought/fading-
+// momentum on exit) so the bot isn't trading on pure noise before it has
+// closed a single trade. From here every weight is still fully overwritten
+// by `learn()` after every close -- this is a starting point, not a script.
 const ENTRY_PRIOR: Features = {
-  mom3: 0.6,
-  mom10: 0.9,
-  mom30: 0.5,
+  chg5m: 0.6,
+  chg1h: 0.9,
+  chg6h: 0.5,
   volatility: 0.3,
   rsi: -0.2,
   smaDist: 0.3,
-  volumeZ: 0.5,
+  buyPressure: 0.5,
   unrealized: 0,
   bias: -0.3,
 };
 
 const EXIT_PRIOR: Features = {
-  mom3: -0.5,
-  mom10: -0.6,
-  mom30: -0.3,
+  chg5m: -0.5,
+  chg1h: -0.6,
+  chg6h: -0.3,
   volatility: 0.4,
   rsi: 0.7,
   smaDist: 0.3,
-  volumeZ: -0.2,
+  buyPressure: -0.2,
   unrealized: 0.6,
   bias: -0.5,
 };

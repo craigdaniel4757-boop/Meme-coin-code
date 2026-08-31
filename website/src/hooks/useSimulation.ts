@@ -1,40 +1,52 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { SimState } from '../types';
-import { createInitialState, stepSimulation } from '../lib/simulation';
+import { createInitialState, stepDecisions } from '../lib/simulation';
+import { mergeMarketUpdate } from '../lib/marketData';
+import { fetchWatchlist } from '../lib/dexscreener';
+import { WATCHLIST } from '../lib/coins';
 import { clearState, loadBrain, loadState, saveBrain, saveState } from '../lib/persist';
 
-export type Speed = 1 | 2 | 5 | 15;
+export type ConnectionStatus = 'connecting' | 'live' | 'reconnecting';
 
-const TICK_MS = 500;
-const SAVE_EVERY_N_TICKS = 4;
+const POLL_INTERVAL_MS = 20_000;
 
 export function useSimulation() {
   const [state, setState] = useState<SimState>(() => loadState() ?? createInitialState());
   const [running, setRunning] = useState(true);
-  const [speed, setSpeed] = useState<Speed>(2);
+  const [status, setStatus] = useState<ConnectionStatus>('connecting');
+  const [lastFetchAt, setLastFetchAt] = useState<number | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const tickCount = useRef(0);
+  const inFlight = useRef(false);
+
+  const poll = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    try {
+      const results = await fetchWatchlist(WATCHLIST.map((w) => w.query));
+      const resolvedCount = results.filter((r) => r.pair).length;
+      const now = Date.now();
+
+      const coins = mergeMarketUpdate(stateRef.current.coins, WATCHLIST, results, now);
+      const next = stepDecisions(stateRef.current, coins);
+      setState(next);
+      saveState(next);
+      saveBrain(next.agent);
+      setLastFetchAt(now);
+      setStatus(resolvedCount > 0 ? 'live' : 'reconnecting');
+    } catch {
+      setStatus('reconnecting');
+    } finally {
+      inFlight.current = false;
+    }
+  }, []);
 
   useEffect(() => {
     if (!running) return;
-    const id = setInterval(() => {
-      setState((prev) => {
-        let next = prev;
-        for (let i = 0; i < speed; i++) next = stepSimulation(next);
-        return next;
-      });
-    }, TICK_MS);
+    poll();
+    const id = setInterval(poll, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [running, speed]);
-
-  useEffect(() => {
-    tickCount.current += 1;
-    if (tickCount.current % SAVE_EVERY_N_TICKS === 0) {
-      saveState(state);
-      saveBrain(state.agent);
-    }
-  }, [state]);
+  }, [running, poll]);
 
   useEffect(() => {
     const onUnload = () => {
@@ -48,15 +60,16 @@ export function useSimulation() {
   const fullReset = useCallback(() => {
     clearState();
     setState(createInitialState());
-  }, []);
+    poll();
+  }, [poll]);
 
   const softReset = useCallback(() => {
     const fresh = createInitialState();
     const brain = loadBrain() ?? stateRef.current.agent;
-    const next = { ...fresh, agent: brain };
+    const next = { ...fresh, agent: brain, coins: stateRef.current.coins };
     saveState(next);
     setState(next);
   }, []);
 
-  return { state, running, setRunning, speed, setSpeed, fullReset, softReset };
+  return { state, running, setRunning, status, lastFetchAt, fullReset, softReset, refreshNow: poll };
 }

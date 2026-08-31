@@ -11,7 +11,7 @@ import { StatsBar } from './components/StatsBar';
 import { Footer } from './components/Footer';
 
 export default function App() {
-  const { state, running, setRunning, speed, setSpeed, fullReset, softReset } = useSimulation();
+  const { state, running, setRunning, status, lastFetchAt, refreshNow, fullReset, softReset } = useSimulation();
   const [resetMenuOpen, setResetMenuOpen] = useState(false);
 
   const equity = useMemo(
@@ -30,8 +30,9 @@ export default function App() {
         totalReturnPct={totalReturnPct}
         running={running}
         setRunning={setRunning}
-        speed={speed}
-        setSpeed={setSpeed}
+        status={status}
+        lastFetchAt={lastFetchAt}
+        onRefreshNow={refreshNow}
         onFullReset={fullReset}
         onSoftReset={softReset}
         resetMenuOpen={resetMenuOpen}

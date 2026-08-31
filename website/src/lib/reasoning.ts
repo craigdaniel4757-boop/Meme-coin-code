@@ -2,25 +2,25 @@ import { FeatureKey } from '../types';
 import { FEATURE_LABELS } from './agent';
 
 const ENTRY_PHRASES: Partial<Record<FeatureKey, string[]>> = {
-  mom3: ['a sharp short-term breakout', 'a fast burst higher'],
-  mom10: ['building 10-tick momentum', 'a strengthening medium-term trend'],
-  mom30: ['a sustained longer-term uptrend'],
+  chg5m: ['a sharp move in the last 5 minutes', 'a fast burst higher on the 5-minute chart'],
+  chg1h: ['a strong last hour', 'building 1-hour momentum'],
+  chg6h: ['a sustained 6-hour uptrend'],
   volatility: ['a volatility squeeze that often precedes a move'],
   rsi: ['RSI curling up out of oversold'],
   smaDist: ['price reclaiming its moving average'],
-  volumeZ: ['a volume surge confirming interest'],
+  buyPressure: ['buyers clearly outnumbering sellers this hour'],
   bias: ['a pattern that has matched past winners'],
   unrealized: ['favorable position momentum'],
 };
 
 const EXIT_PHRASES: Partial<Record<FeatureKey, string[]>> = {
-  mom3: ['a sudden reversal candle'],
-  mom10: ['fading medium-term momentum'],
-  mom30: ['the broader trend rolling over'],
+  chg5m: ['a sudden reversal in the last 5 minutes'],
+  chg1h: ['fading 1-hour momentum'],
+  chg6h: ['the 6-hour trend rolling over'],
   volatility: ['a volatility spike that raised risk'],
   rsi: ['RSI hitting overbought extremes'],
   smaDist: ['price stretched too far from its average'],
-  volumeZ: ['a volume drop-off'],
+  buyPressure: ['sell pressure building this hour'],
   unrealized: ['the open profit/loss on the position'],
   bias: ['accumulated experience with this setup'],
 };

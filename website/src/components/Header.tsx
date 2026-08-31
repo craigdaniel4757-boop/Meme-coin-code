@@ -1,5 +1,5 @@
-import { formatPct, formatUsd } from '../lib/format';
-import type { Speed } from '../hooks/useSimulation';
+import { formatPct, formatUsd, timeAgo } from '../lib/format';
+import type { ConnectionStatus } from '../hooks/useSimulation';
 
 interface Props {
   equity: number;
@@ -7,15 +7,26 @@ interface Props {
   totalReturnPct: number;
   running: boolean;
   setRunning: (v: boolean) => void;
-  speed: Speed;
-  setSpeed: (v: Speed) => void;
+  status: ConnectionStatus;
+  lastFetchAt: number | null;
+  onRefreshNow: () => void;
   onFullReset: () => void;
   onSoftReset: () => void;
   resetMenuOpen: boolean;
   setResetMenuOpen: (v: boolean) => void;
 }
 
-const SPEEDS: Speed[] = [1, 2, 5, 15];
+const STATUS_LABEL: Record<ConnectionStatus, string> = {
+  connecting: '◐ Connecting…',
+  live: '● Live · DexScreener',
+  reconnecting: '◐ Reconnecting…',
+};
+
+const STATUS_CLASS: Record<ConnectionStatus, string> = {
+  connecting: 'border-slate-500/40 text-slate-300 bg-slate-500/10',
+  live: 'border-up/40 text-up bg-up/10',
+  reconnecting: 'border-amber-500/40 text-amber-400 bg-amber-500/10',
+};
 
 export function Header(props: Props) {
   const {
@@ -24,8 +35,9 @@ export function Header(props: Props) {
     totalReturnPct,
     running,
     setRunning,
-    speed,
-    setSpeed,
+    status,
+    lastFetchAt,
+    onRefreshNow,
     onFullReset,
     onSoftReset,
     resetMenuOpen,
@@ -42,10 +54,10 @@ export function Header(props: Props) {
           </div>
           <div>
             <div className="font-semibold tracking-tight leading-tight">MemeMind AI</div>
-            <div className="text-[11px] text-slate-400 leading-tight">Self-learning paper trader</div>
+            <div className="text-[11px] text-slate-400 leading-tight">Real Solana meme coin prices, paper trades</div>
           </div>
           <span className="ml-2 hidden sm:inline-flex items-center gap-1 text-[10px] uppercase tracking-wide font-medium text-accent2 border border-accent2/30 bg-accent2/10 rounded-full px-2 py-1">
-            Simulated · Not real money
+            Paper trading · Not real money
           </span>
         </div>
 
@@ -64,6 +76,23 @@ export function Header(props: Props) {
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="hidden lg:block text-right mr-1">
+            <div className={`text-xs font-medium px-2 py-1 rounded-md border ${STATUS_CLASS[status]}`}>
+              {STATUS_LABEL[status]}
+            </div>
+            {lastFetchAt !== null && (
+              <div className="text-[10px] text-slate-500 mt-0.5">Updated {timeAgo(lastFetchAt)}</div>
+            )}
+          </div>
+
+          <button
+            onClick={onRefreshNow}
+            title="Refresh now"
+            className="px-2.5 py-1.5 rounded-md text-sm border border-border text-slate-300 hover:bg-panel2 transition"
+          >
+            ⟳
+          </button>
+
           <button
             onClick={() => setRunning(!running)}
             className={`px-3 py-1.5 rounded-md text-sm font-medium border transition ${
@@ -72,22 +101,8 @@ export function Header(props: Props) {
                 : 'border-slate-500/40 text-slate-300 bg-slate-500/10 hover:bg-slate-500/20'
             }`}
           >
-            {running ? '● Live' : '▶ Paused'}
+            {running ? '⏸ Trading' : '▶ Paused'}
           </button>
-
-          <div className="flex items-center rounded-md border border-border overflow-hidden">
-            {SPEEDS.map((s) => (
-              <button
-                key={s}
-                onClick={() => setSpeed(s)}
-                className={`px-2.5 py-1.5 text-sm font-mono transition ${
-                  speed === s ? 'bg-accent text-white' : 'text-slate-400 hover:bg-panel2'
-                }`}
-              >
-                {s}x
-              </button>
-            ))}
-          </div>
 
           <div className="relative">
             <button

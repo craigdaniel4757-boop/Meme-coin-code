@@ -1,16 +1,18 @@
 import { Coin, CoinId, FeedEvent, Position, SimState } from '../types';
-import { createMarket, tickMarket } from './market';
 import { computeFeatures } from './indicators';
 import { createAgent, decide, learn, nextEpsilon, nextLearningRate } from './agent';
 import { explainEntry, explainExit, explainMaxHold, explainStop } from './reasoning';
 
 export const STARTING_CASH = 1000;
 export const MAX_POSITIONS = 4;
-export const FEE_RATE = 0.006;
+export const BASE_FEE_RATE = 0.005;
+export const SLIPPAGE_COEFF = 2;
+export const MAX_FEE_RATE = 0.06;
 export const STOP_LOSS_PCT = -0.28;
-export const MAX_HOLD_TICKS = 280;
+export const MAX_HOLD_TICKS = 180; // ~1 hour at the 20s poll cadence
 export const ENTRY_THRESHOLD = 0.62;
 export const EXIT_THRESHOLD = 0.58;
+export const FULL_SIZE_LIQUIDITY_USD = 150_000;
 
 const EQUITY_CAP = 600;
 const EVENT_LOG_CAP = 150;
@@ -22,10 +24,12 @@ function nextEventId(): string {
 }
 
 export function computeEquity(coins: Coin[], cash: number, positions: Record<CoinId, Position>): number {
+  const byId = new Map(coins.map((c) => [c.id, c]));
   let total = cash;
-  for (const coin of coins) {
-    const pos = positions[coin.id];
-    if (pos) total += pos.quantity * coin.price;
+  for (const coinId of Object.keys(positions)) {
+    const pos = positions[coinId];
+    const coin = byId.get(coinId);
+    if (coin) total += pos.quantity * coin.price;
   }
   return total;
 }
@@ -33,7 +37,7 @@ export function computeEquity(coins: Coin[], cash: number, positions: Record<Coi
 export function createInitialState(): SimState {
   return {
     tick: 0,
-    coins: createMarket(),
+    coins: [],
     cash: STARTING_CASH,
     positions: {},
     events: [],
@@ -48,9 +52,21 @@ function pushEvent(events: FeedEvent[], event: FeedEvent): void {
   if (events.length > EVENT_LOG_CAP) events.length = EVENT_LOG_CAP;
 }
 
-export function stepSimulation(prev: SimState): SimState {
+// Approximates real DEX swap cost: a flat base fee plus a slippage
+// estimate that grows with how large the trade is relative to the pool's
+// liquidity -- trading a thin pool costs meaningfully more than trading a
+// deep one, same as it would through a real Jupiter-routed swap.
+function estimatedFeeRate(tradeUsd: number, liquidityUsd: number): number {
+  const slippage = liquidityUsd > 0 ? (tradeUsd / liquidityUsd) * SLIPPAGE_COEFF : MAX_FEE_RATE;
+  return Math.min(MAX_FEE_RATE, BASE_FEE_RATE + Math.max(0, slippage));
+}
+
+// Runs one decision step against an already-updated coin list (the caller
+// is responsible for fetching fresh DexScreener data and folding it into
+// `coins` via lib/marketData.ts -- this function only manages risk,
+// entries/exits, and learning).
+export function stepDecisions(prev: SimState, coins: Coin[]): SimState {
   const tick = prev.tick + 1;
-  const coins = tickMarket(prev.coins);
   const positions: Record<CoinId, Position> = { ...prev.positions };
   const events = prev.events.slice();
   let cash = prev.cash;
@@ -61,7 +77,8 @@ export function stepSimulation(prev: SimState): SimState {
 
   function closeTrade(coin: Coin, pos: Position, reasoning: string, confidence: number): void {
     const grossProceeds = pos.quantity * coin.price;
-    const fee = grossProceeds * FEE_RATE;
+    const feeRate = estimatedFeeRate(grossProceeds, coin.liquidityUsd);
+    const fee = grossProceeds * feeRate;
     const netProceeds = grossProceeds - fee;
     cash += netProceeds;
     totalFeesPaid += fee;
@@ -98,7 +115,8 @@ export function stepSimulation(prev: SimState): SimState {
   for (const coinId of Object.keys(positions)) {
     const pos = positions[coinId];
     const coin = coinById.get(coinId);
-    if (!coin) continue;
+    if (!coin) continue; // fell out of the watchlist entirely this cycle -- re-evaluate next poll
+
     const unrealizedPct = (coin.price - pos.entryPrice) / pos.entryPrice;
 
     if (unrealizedPct <= STOP_LOSS_PCT) {
@@ -109,6 +127,7 @@ export function stepSimulation(prev: SimState): SimState {
       closeTrade(coin, pos, explainMaxHold(coin.ticker), 0.5);
       continue;
     }
+    if (coin.stale) continue; // don't let the learned policy act on a stale snapshot
 
     const features = computeFeatures(coin, unrealizedPct);
     const d = decide(agent.exit, features, agent.epsilon);
@@ -123,25 +142,27 @@ export function stepSimulation(prev: SimState): SimState {
   const slots = MAX_POSITIONS - openCount;
   if (slots > 0 && cash > 15) {
     const candidates = coins
-      .filter((coin) => !positions[coin.id])
+      .filter((coin) => !positions[coin.id] && !coin.stale)
       .map((coin) => ({ coin, d: decide(agent.entry, computeFeatures(coin, 0), agent.epsilon) }))
       .filter(({ d }) => (d.explore ? Math.random() < 0.3 : d.probability > ENTRY_THRESHOLD))
       .sort((a, b) => b.d.probability - a.d.probability)
       .slice(0, slots);
 
-    // Position size scales with both this signal's confidence and the
-    // model's overall experience -- small, cautious bets while it's still
-    // finding its footing, sizing up toward the full 22%-of-equity risk
-    // budget once it has a track record of closed trades to learn from.
+    // Position size scales with signal confidence, the model's overall
+    // experience, and this pair's liquidity depth -- small, cautious bets
+    // on illiquid or unproven setups, sizing up toward the full 22%-of-
+    // equity risk budget for liquid pairs once the model has a track record.
     const experienceFactor = Math.min(1, 0.4 + agent.updates / 50);
 
     for (const { coin, d } of candidates) {
       const equity = computeEquity(coins, cash, positions);
       const confidenceFactor = 0.6 + 0.4 * d.confidence;
-      const targetSize = Math.min(cash * 0.9, equity * 0.22 * experienceFactor * confidenceFactor);
+      const liquidityFactor = Math.max(0.3, Math.min(1, coin.liquidityUsd / FULL_SIZE_LIQUIDITY_USD));
+      const targetSize = Math.min(cash * 0.9, equity * 0.22 * experienceFactor * confidenceFactor * liquidityFactor);
       if (targetSize < 10) continue;
 
-      const fee = targetSize * FEE_RATE;
+      const feeRate = estimatedFeeRate(targetSize, coin.liquidityUsd);
+      const fee = targetSize * feeRate;
       const quantity = (targetSize - fee) / coin.price;
       if (!isFinite(quantity) || quantity <= 0) continue;
 

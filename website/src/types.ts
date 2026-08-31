@@ -1,29 +1,44 @@
 export type CoinId = string;
 
-export type Regime = 'choppy' | 'uptrend' | 'downtrend' | 'pump' | 'dump';
+export interface PriceChange {
+  m5: number;
+  h1: number;
+  h6: number;
+  h24: number;
+}
 
 export interface Coin {
   id: CoinId;
+  address: string;
   name: string;
   ticker: string;
   color: string;
+  dexId: string;
+  pairUrl: string | null;
   price: number;
   prevPrice: number;
   history: number[];
-  volume: number;
-  volumeHistory: number[];
-  regime: Regime;
-  regimeTicksLeft: number;
+  liquidityUsd: number;
+  fdv: number | null;
+  priceChange: PriceChange;
+  buys1h: number;
+  sells1h: number;
+  lastUpdated: number;
+  // True when the most recent poll couldn't resolve this coin (dropped
+  // out of search results, below the liquidity floor, or a request
+  // error) -- still shown with its last known price, but excluded from
+  // new decisions until it resolves again.
+  stale: boolean;
 }
 
 export interface Features {
-  mom3: number;
-  mom10: number;
-  mom30: number;
+  chg5m: number;
+  chg1h: number;
+  chg6h: number;
   volatility: number;
   rsi: number;
   smaDist: number;
-  volumeZ: number;
+  buyPressure: number;
   unrealized: number;
   bias: number;
 }

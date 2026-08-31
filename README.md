@@ -17,10 +17,11 @@ activity — it does not, and cannot, guarantee profit.
 
 > **Looking for the browser demo instead?** [`website/`](website/) is a
 > separate, self-contained web app: an AI agent that paper-trades a basket
-> of *fictional* meme coins starting from a simulated $1,000 balance,
-> entirely in your browser (no backend, no real market data, no real
-> funds). It shares no code with memebot below — see
-> [`website/README.md`](website/README.md).
+> of *real, live Solana meme coins* (real tickers/prices/liquidity from
+> DexScreener's public API) starting from a simulated $1,000 balance,
+> entirely in your browser (no backend, no connected wallet, no real
+> funds — every trade is simulated bookkeeping). It shares no code with
+> memebot below — see [`website/README.md`](website/README.md).
 
 ## What it actually does
 
