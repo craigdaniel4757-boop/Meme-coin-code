@@ -1,0 +1,32 @@
+{
+  "name": "stock-chart-analyzer",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Upload a stock chart screenshot and get a transparent, data-backed technical analysis walkthrough. Free data sources only.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.3.4",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "lightweight-charts": "4.2.0",
+    "tesseract.js": "5.1.1",
+    "clsx": "2.1.1"
+  },
+  "devDependencies": {
+    "typescript": "5.7.3",
+    "@types/node": "20.17.9",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "tailwindcss": "3.4.17",
+    "postcss": "8.5.26",
+    "autoprefixer": "10.4.20"
+  },
+  "engines": {
+    "node": ">=18.18.0"
+  }
+}
