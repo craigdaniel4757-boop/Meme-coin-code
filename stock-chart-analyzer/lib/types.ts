@@ -18,14 +18,24 @@ export interface Bar {
 
 export type DataQuality = 'real-intraday' | 'real-daily' | 'image-only';
 
+export interface CrossValidation {
+  agrees: boolean;
+  deltaPct: number;
+  otherSource: 'stooq' | 'yahoo';
+}
+
 export interface QuoteSeries {
   symbol: string;
   resolvedSymbol: string;
   source: 'stooq' | 'yahoo';
   interval: string;
+  /** Extended history used for analysis (SMA200/ADX/backtest warm-up) — not all of it is charted. */
   bars: Bar[];
+  /** The timeframe-appropriate slice actually rendered on the chart. */
+  displayBars: Bar[];
   quality: DataQuality;
   currency?: string;
+  crossValidated: CrossValidation | null;
 }
 
 export interface SwingPoint {
@@ -76,6 +86,7 @@ export interface VolatilityReading {
   atrPct: number | null;
   bollingerWidthPct: number | null;
   squeeze: boolean;
+  squeezeJustFired: boolean;
   notes: string[];
 }
 
@@ -108,6 +119,23 @@ export interface IndicatorSnapshot {
   dmi: { adx: number; plusDI: number; minusDI: number } | null;
   stochastic: { k: number; d: number } | null;
   vwap: number | null;
+  ichimoku: { tenkan: number; kijun: number; senkouA: number; senkouB: number; cloudPosition: CloudPosition } | null;
+  sar: { value: number; trend: 'up' | 'down' } | null;
+  cmf: number | null;
+  roc: number | null;
+  pivots: PivotLevels | null;
+}
+
+export type CloudPosition = 'above' | 'below' | 'inside' | 'unknown';
+
+export interface PivotLevels {
+  pp: number;
+  r1: number;
+  r2: number;
+  r3: number;
+  s1: number;
+  s2: number;
+  s3: number;
 }
 
 export interface PeriodHighLow {
@@ -117,6 +145,22 @@ export interface PeriodHighLow {
   pctFromLow: number;
   nearHigh: boolean;
   nearLow: boolean;
+}
+
+export interface HigherTimeframeContext {
+  direction: TrendDirection;
+  agrees: boolean;
+}
+
+export interface AnalysisContext {
+  relativeStrength?: RelativeStrengthReading | null;
+  crossValidated?: CrossValidation | null;
+  /** Length of the timeframe-appropriate display window, for anchoring VWAP sensibly when `bars`
+   * carries much more history than is shown (see lib/dataSources.ts). Defaults to all of `bars`
+   * (VWAP anchored at the very start of history) when omitted. */
+  displayBarCount?: number;
+  /** Daily-trend cross-check, computed by the caller, for intraday (1D/5D) reads only. */
+  higherTimeframe?: HigherTimeframeContext | null;
 }
 
 export interface RelativeStrengthReading {
@@ -138,6 +182,10 @@ export interface BacktestSignalStat {
 export interface BacktestReading {
   rsiOversoldBounce: BacktestSignalStat;
   rsiOverboughtFade: BacktestSignalStat;
+  maCrossBullish: BacktestSignalStat;
+  maCrossBearish: BacktestSignalStat;
+  macdCrossBullish: BacktestSignalStat;
+  macdCrossBearish: BacktestSignalStat;
 }
 
 export interface AnalysisResult {
@@ -146,6 +194,7 @@ export interface AnalysisResult {
   confidence: number; // 0-100
   dataQuality: DataQuality;
   sampleSize: number;
+  crossValidated: CrossValidation | null;
   trend: TrendReading;
   momentum: MomentumReading;
   volatility: VolatilityReading;
@@ -156,6 +205,7 @@ export interface AnalysisResult {
   periodHighLow: PeriodHighLow | null;
   relativeStrength: RelativeStrengthReading | null;
   backtest: BacktestReading | null;
+  higherTimeframeContext: HigherTimeframeContext | null;
   imageOnly?: ImageHeuristics | null;
 }
 

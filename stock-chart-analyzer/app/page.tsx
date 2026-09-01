@@ -14,9 +14,18 @@ import { analyzeChartImage } from '@/lib/imageAnalysis';
 import { analyzeSeries, analyzeImageOnly } from '@/lib/scorer';
 import { computeRelativeStrength } from '@/lib/relativeStrength';
 import { generatePlan } from '@/lib/planner';
-import type { AnalysisResult, Horizon, Plan, QuoteSeries, RelativeStrengthReading, Timeframe } from '@/lib/types';
+import type { AnalysisResult, Bar, HigherTimeframeContext, Horizon, Plan, QuoteSeries, RelativeStrengthReading, Timeframe } from '@/lib/types';
 
 const BENCHMARK_SYMBOL = 'SPY';
+
+function simpleDirection(bars: Bar[]): 'up' | 'down' | 'flat' {
+  if (bars.length < 2) return 'flat';
+  const first = bars[0]!.close;
+  const last = bars[bars.length - 1]!.close;
+  if (first === 0) return 'flat';
+  const change = (last - first) / first;
+  return Math.abs(change) < 0.001 ? 'flat' : change > 0 ? 'up' : 'down';
+}
 
 async function fetchQuote(symbol: string, timeframe: Timeframe): Promise<{ series: QuoteSeries | null; error: string | null }> {
   try {
@@ -128,21 +137,41 @@ export default function Home() {
         }
       }
 
-      const [imageHeuristics, benchmarkOutcome] = await Promise.all([
+      const isIntraday = timeframe === '1D' || timeframe === '5D';
+      const [imageHeuristics, benchmarkOutcome, higherTimeframeOutcome] = await Promise.all([
         analyzeChartImage(file).catch(() => null),
         series && trimmedTicker !== BENCHMARK_SYMBOL
           ? fetchQuote(BENCHMARK_SYMBOL, timeframe)
           : Promise.resolve({ series: null, error: null }),
+        series && isIntraday ? fetchQuote(series.resolvedSymbol, '3M') : Promise.resolve({ series: null, error: null }),
       ]);
 
       let relativeStrength: RelativeStrengthReading | null = null;
       if (series && benchmarkOutcome.series) {
-        relativeStrength = computeRelativeStrength(series.bars, benchmarkOutcome.series.bars, BENCHMARK_SYMBOL);
+        // Relative strength is deliberately computed over the displayed window (what the user
+        // actually selected), not the much-longer history fetched for indicator warm-up.
+        relativeStrength = computeRelativeStrength(series.displayBars, benchmarkOutcome.series.displayBars, BENCHMARK_SYMBOL);
+      }
+
+      let higherTimeframe: HigherTimeframeContext | null = null;
+      if (series && higherTimeframeOutcome.series) {
+        const dailyDirection = analyzeSeries(higherTimeframeOutcome.series.bars, 'real-daily').trend.direction;
+        const intradayDirection = simpleDirection(series.displayBars);
+        const agrees =
+          intradayDirection === 'flat' ||
+          (intradayDirection === 'up' && dailyDirection === 'uptrend') ||
+          (intradayDirection === 'down' && dailyDirection === 'downtrend');
+        higherTimeframe = { direction: dailyDirection, agrees };
       }
 
       let finalResult: AnalysisResult;
       if (series) {
-        const base = analyzeSeries(series.bars, series.quality, relativeStrength);
+        const base = analyzeSeries(series.bars, series.quality, {
+          relativeStrength,
+          crossValidated: series.crossValidated,
+          displayBarCount: series.displayBars.length,
+          higherTimeframe,
+        });
         finalResult = imageHeuristics ? { ...base, imageOnly: imageHeuristics } : base;
       } else if (imageHeuristics) {
         finalResult = analyzeImageOnly(imageHeuristics);

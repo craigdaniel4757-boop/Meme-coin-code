@@ -8,14 +8,33 @@
 // (lib/backtest.ts) is deliberately *not* one of those weights — it's context to weigh, not a
 // vote, so the score can't quietly become self-referential.
 
-import { adx, atr, bollingerBands, ema, lastValid, macd, obv, rsi, sma, stochastic, anchoredVwap } from './indicators';
-import { backtestRsiMeanReversion } from './backtest';
+import {
+  adx,
+  atr,
+  bollingerBands,
+  chaikinMoneyFlow,
+  classicPivotPoints,
+  ema,
+  ichimoku,
+  keltnerChannels,
+  lastValid,
+  macd,
+  obv,
+  parabolicSar,
+  roc,
+  rsi,
+  sma,
+  stochastic,
+  anchoredVwap,
+} from './indicators';
+import { runBacktests } from './backtest';
 import { detectCandlestickPatterns } from './candlePatterns';
 import {
   classifyTrend,
   detectBreakout,
   detectDoubleTopBottom,
   detectFlag,
+  detectGap,
   detectHeadAndShoulders,
   detectTriangle,
   fibonacciLevels,
@@ -27,16 +46,19 @@ import {
 } from './patterns';
 import { clusterLevels, findSwingPoints } from './swings';
 import type {
+  AnalysisContext,
   AnalysisResult,
   Bar,
+  CloudPosition,
   DataQuality,
   ImageHeuristics,
   IndicatorSnapshot,
   MomentumReading,
   PatternFlag,
-  RelativeStrengthReading,
   Signal,
 } from './types';
+
+const HIGH_LOW_WINDOW_BARS = 252; // ~1 trading year — keeps "period high/low" meaning "52-week" even when analysis history runs much longer
 
 const CONFIDENCE_FLOOR = 5;
 const CONFIDENCE_CEILING = 92;
@@ -80,11 +102,11 @@ function pushIfPresent(patterns: PatternFlag[], id: string, label: string, diver
   });
 }
 
-export function analyzeSeries(
-  bars: Bar[],
-  quality: DataQuality,
-  relativeStrength: RelativeStrengthReading | null = null,
-): AnalysisResult {
+export function analyzeSeries(bars: Bar[], quality: DataQuality, context: AnalysisContext = {}): AnalysisResult {
+  const relativeStrength = context.relativeStrength ?? null;
+  const crossValidated = context.crossValidated ?? null;
+  const higherTimeframe = context.higherTimeframe ?? null;
+  const displayBarCount = context.displayBarCount ?? bars.length;
   const closes = bars.map((b) => b.close);
   const lastClose = closes[closes.length - 1]!;
 
@@ -100,7 +122,15 @@ export function analyzeSeries(
   const adxResult = adx(bars, 14);
   const stochResult = stochastic(bars, 14, 3);
   const obvSeries = obv(bars);
-  const vwapSeries = anchoredVwap(bars, 0);
+  const keltner = keltnerChannels(closes, atrSeries, 20, 1.5);
+  const ichimokuResult = ichimoku(bars, 9, 26, 52);
+  const sarSeries = parabolicSar(bars);
+  const cmfSeries = chaikinMoneyFlow(bars, 20);
+  const rocSeries = roc(closes, 12);
+  // Anchor at the start of the *displayed* window, not the full extended history fetched for
+  // indicator warm-up — otherwise VWAP degrades into a meaningless multi-year average.
+  const vwapAnchorIndex = Math.max(0, bars.length - displayBarCount);
+  const vwapSeries = anchoredVwap(bars, vwapAnchorIndex);
 
   const adxLast = lastValid(adxResult.adx);
   const plusDILast = lastValid(adxResult.plusDI);
@@ -108,6 +138,22 @@ export function analyzeSeries(
   const stochKLast = lastValid(stochResult.k);
   const stochDLast = lastValid(stochResult.d);
   const vwapLast = lastValid(vwapSeries);
+  const tenkanLast = lastValid(ichimokuResult.tenkan);
+  const kijunLast = lastValid(ichimokuResult.kijun);
+  const senkouALast = lastValid(ichimokuResult.senkouA);
+  const senkouBLast = lastValid(ichimokuResult.senkouB);
+  const cmfLast = lastValid(cmfSeries);
+  const rocLast = lastValid(rocSeries);
+  const sarLast = sarSeries[sarSeries.length - 1] ?? null;
+  const sarPrev = sarSeries.length >= 2 ? (sarSeries[sarSeries.length - 2] ?? null) : null;
+  const sarJustFlipped = sarLast !== null && sarPrev !== null && sarLast.trend !== sarPrev.trend;
+
+  let cloudPosition: CloudPosition = 'unknown';
+  if (senkouALast !== null && senkouBLast !== null) {
+    const cloudTop = Math.max(senkouALast, senkouBLast);
+    const cloudBottom = Math.min(senkouALast, senkouBLast);
+    cloudPosition = lastClose > cloudTop ? 'above' : lastClose < cloudBottom ? 'below' : 'inside';
+  }
 
   const indicators: IndicatorSnapshot = {
     lastClose,
@@ -133,12 +179,27 @@ export function analyzeSeries(
     dmi: adxLast !== null ? { adx: adxLast, plusDI: plusDILast ?? 0, minusDI: minusDILast ?? 0 } : null,
     stochastic: stochKLast !== null && stochDLast !== null ? { k: stochKLast, d: stochDLast } : null,
     vwap: vwapLast,
+    ichimoku:
+      tenkanLast !== null && kijunLast !== null && senkouALast !== null && senkouBLast !== null
+        ? { tenkan: tenkanLast, kijun: kijunLast, senkouA: senkouALast, senkouB: senkouBLast, cloudPosition }
+        : null,
+    sar: sarLast,
+    cmf: cmfLast,
+    roc: rocLast,
+    pivots: classicPivotPoints(bars[bars.length - 1]!.high, bars[bars.length - 1]!.low, lastClose),
   };
 
   const swingWindow = bars.length > 120 ? 4 : bars.length > 40 ? 3 : 2;
   const swings = findSwingPoints(bars, swingWindow);
   const levels = clusterLevels(swings, lastClose, bars.length);
   const trend = classifyTrend(bars, sma50, sma200, swings, { adx: adxLast, plusDI: plusDILast, minusDI: minusDILast });
+  if (cloudPosition !== 'unknown') {
+    trend.notes.push(
+      cloudPosition === 'inside'
+        ? 'Price is inside the Ichimoku cloud — a transitional, lower-conviction zone.'
+        : `Price is ${cloudPosition} the Ichimoku cloud, consistent with a ${cloudPosition === 'above' ? 'bullish' : 'bearish'} trend context.`,
+    );
+  }
 
   const rsiDiv = computeRsiDivergence(rsiSeries, swings);
   const macdDiv = computeMacdDivergence(macdResult.macd, swings);
@@ -177,6 +238,15 @@ export function analyzeSeries(
       `Price is trading ${lastClose >= vwapLast ? 'above' : 'below'} its period VWAP (~${vwapLast.toFixed(2)}), a volume-weighted fair-value reference.`,
     );
   }
+  if (sarJustFlipped && sarLast) {
+    momentumNotes.push(`Parabolic SAR just flipped ${sarLast.trend === 'up' ? 'bullish' : 'bearish'} — a classic trend-following trigger.`);
+  }
+  if (cmfLast !== null && Math.abs(cmfLast) > 0.1) {
+    momentumNotes.push(`Chaikin Money Flow is ${cmfLast >= 0 ? 'notably positive' : 'notably negative'} (${cmfLast.toFixed(2)}) — ${cmfLast >= 0 ? 'buying' : 'selling'} pressure over the last 20 bars.`);
+  }
+  if (rocLast !== null && Math.abs(rocLast) > 5) {
+    momentumNotes.push(`Rate of Change (12) is ${rocLast >= 0 ? '+' : ''}${rocLast.toFixed(1)}% — a notably fast recent move.`);
+  }
 
   const momentum: MomentumReading = {
     rsi: rsiLast,
@@ -192,7 +262,7 @@ export function analyzeSeries(
     notes: momentumNotes,
   };
 
-  const volatility = volatilityReading(atrSeries, bb, lastClose);
+  const volatility = volatilityReading(atrSeries, bb, keltner, lastClose);
 
   const patterns: PatternFlag[] = [
     ...detectDoubleTopBottom(swings),
@@ -201,14 +271,34 @@ export function analyzeSeries(
     ...detectHeadAndShoulders(swings),
     ...detectFlag(bars),
     ...detectCandlestickPatterns(bars),
+    ...(quality === 'real-intraday' ? [] : detectGap(bars)),
   ];
   if (volatility.squeeze) {
     patterns.push({
       id: 'bollinger-squeeze',
-      label: 'Bollinger Band squeeze',
+      label: 'TTM squeeze',
       bias: 'neutral',
       confidence: 0.5,
-      description: 'Volatility is compressed to recent lows — often precedes an expansion move, direction unconfirmed until price breaks a band.',
+      description: 'Bollinger Bands are pinched inside the Keltner Channels — often precedes an expansion move, direction unconfirmed until it fires.',
+    });
+  } else if (volatility.squeezeJustFired) {
+    const mid = lastValid(bb.middle);
+    const fireBias: PatternFlag['bias'] = mid !== null ? (lastClose >= mid ? 'bullish' : 'bearish') : 'neutral';
+    patterns.push({
+      id: 'squeeze-fired',
+      label: 'Squeeze fired',
+      bias: fireBias,
+      confidence: 0.55,
+      description: `Volatility just expanded out of a squeeze with price ${fireBias === 'neutral' ? 'near the midline' : `${fireBias === 'bullish' ? 'above' : 'below'} the midline`} — often the start of a directional move.`,
+    });
+  }
+  if (sarJustFlipped && sarLast) {
+    patterns.push({
+      id: `sar-flip-${sarLast.trend}`,
+      label: `Parabolic SAR flipped ${sarLast.trend === 'up' ? 'bullish' : 'bearish'}`,
+      bias: sarLast.trend === 'up' ? 'bullish' : 'bearish',
+      confidence: 0.5,
+      description: `The trailing SAR stop just flipped to the ${sarLast.trend} side of price — a classic trend-following trigger, prone to whipsaws in choppy conditions.`,
     });
   }
   pushIfPresent(patterns, 'rsi-divergence', 'RSI divergence', rsiDiv, 'RSI');
@@ -228,8 +318,10 @@ export function analyzeSeries(
   }
 
   const fib = fibonacciLevels(swings);
-  const periodHighLow = periodHighLowContext(bars);
-  const backtest = backtestRsiMeanReversion(bars, rsiSeries, 5);
+  const periodHighLow = periodHighLowContext(
+    bars.length > HIGH_LOW_WINDOW_BARS ? bars.slice(-HIGH_LOW_WINDOW_BARS) : bars,
+  );
+  const backtest = runBacktests(bars, rsiSeries, sma50, sma200, macdResult.macd, macdResult.signal);
 
   // --- Score assembly -------------------------------------------------
   const trendComponent =
@@ -237,10 +329,9 @@ export function analyzeSeries(
 
   const rsiComponent = rsiLast === null ? null : clamp((rsiLast - 50) / 50, -1, 1);
   const stochComponent = stochKLast === null ? null : clamp((stochKLast - 50) / 50, -1, 1);
-  const momentumComponent =
-    rsiComponent !== null && stochComponent !== null
-      ? (rsiComponent + stochComponent) / 2
-      : (rsiComponent ?? stochComponent ?? 0);
+  const rocComponent = rocLast === null ? null : clamp(rocLast / 10, -1, 1);
+  const momentumParts = [rsiComponent, stochComponent, rocComponent].filter((c): c is number => c !== null);
+  const momentumComponent = momentumParts.length > 0 ? momentumParts.reduce((a, b) => a + b, 0) / momentumParts.length : 0;
 
   let macdComponent = 0;
   if (indicators.macd) {
@@ -266,13 +357,22 @@ export function analyzeSeries(
 
   const rsComponent = relativeStrength ? clamp(relativeStrength.relativeStrengthPct / 15, -1, 1) : 0;
 
-  const WEIGHTS = { trend: 32, momentum: 18, macd: 15, patterns: 28, relativeStrength: 7 };
+  const ichimokuComponent = cloudPosition === 'above' ? 1 : cloudPosition === 'below' ? -1 : 0;
+  const sarComponent = sarLast ? (sarLast.trend === 'up' ? 1 : -1) : 0;
+  const cmfComponent = cmfLast === null ? 0 : clamp(cmfLast / 0.25, -1, 1);
+
+  // Weights sum to 100. Ichimoku/SAR/CMF are newer, narrower signals kept deliberately light
+  // relative to trend/patterns so they nudge rather than dominate the read.
+  const WEIGHTS = { trend: 26, momentum: 16, macd: 12, patterns: 24, relativeStrength: 6, ichimoku: 8, sar: 4, cmf: 4 };
   const rawScore =
     trendComponent * WEIGHTS.trend +
     momentumComponent * WEIGHTS.momentum +
     macdComponent * WEIGHTS.macd +
     patternsComponent * WEIGHTS.patterns +
-    rsComponent * WEIGHTS.relativeStrength;
+    rsComponent * WEIGHTS.relativeStrength +
+    ichimokuComponent * WEIGHTS.ichimoku +
+    sarComponent * WEIGHTS.sar +
+    cmfComponent * WEIGHTS.cmf;
   const score = clamp(Math.round(rawScore), -100, 100);
 
   let signal: Signal;
@@ -286,17 +386,34 @@ export function analyzeSeries(
   const qualityBase = quality === 'image-only' ? 28 : quality === 'real-intraday' ? 58 : 62;
   const sampleAdequacy = clamp(bars.length / MIN_BARS_FOR_FULL_ANALYSIS, 0, 1) * 16;
 
-  const componentSigns = [trendComponent, momentumComponent, macdComponent, patternsComponent, rsComponent].filter(
-    (c) => Math.abs(c) > 0.05,
-  );
+  const componentSigns = [
+    trendComponent,
+    momentumComponent,
+    macdComponent,
+    patternsComponent,
+    rsComponent,
+    ichimokuComponent,
+    sarComponent,
+    cmfComponent,
+  ].filter((c) => Math.abs(c) > 0.05);
   const agreeing = componentSigns.filter((c) => Math.sign(c) === Math.sign(rawScore || 1)).length;
   const agreementBonus = componentSigns.length > 0 ? (agreeing / componentSigns.length) * 12 : 0;
 
   const squeezePenalty = volatility.squeeze ? -6 : 0;
   const adxAdjustment = trend.adxState === 'trending' ? 5 : trend.adxState === 'choppy' ? -8 : 0;
+  const crossValidationPenalty = crossValidated && !crossValidated.agrees ? -10 : 0;
+  const higherTimeframeAdjustment = higherTimeframe ? (higherTimeframe.agrees ? 5 : -8) : 0;
 
   const confidence = clamp(
-    Math.round(qualityBase + sampleAdequacy + agreementBonus + squeezePenalty + adxAdjustment),
+    Math.round(
+      qualityBase +
+        sampleAdequacy +
+        agreementBonus +
+        squeezePenalty +
+        adxAdjustment +
+        crossValidationPenalty +
+        higherTimeframeAdjustment,
+    ),
     CONFIDENCE_FLOOR,
     CONFIDENCE_CEILING,
   );
@@ -307,6 +424,7 @@ export function analyzeSeries(
     confidence,
     dataQuality: quality,
     sampleSize: bars.length,
+    crossValidated,
     trend,
     momentum,
     volatility,
@@ -317,6 +435,7 @@ export function analyzeSeries(
     periodHighLow,
     relativeStrength,
     backtest,
+    higherTimeframeContext: higherTimeframe,
   };
 }
 
@@ -345,6 +464,7 @@ export function analyzeImageOnly(heuristics: ImageHeuristics): AnalysisResult {
     confidence,
     dataQuality: 'image-only',
     sampleSize: 0,
+    crossValidated: null,
     trend: {
       direction: heuristics.slopeDirection === 'up' ? 'uptrend' : heuristics.slopeDirection === 'down' ? 'downtrend' : 'sideways',
       strength: heuristics.slopeConfidence,
@@ -367,7 +487,7 @@ export function analyzeImageOnly(heuristics: ImageHeuristics): AnalysisResult {
       obvTrend: 'unknown',
       notes: [],
     },
-    volatility: { atr: null, atrPct: null, bollingerWidthPct: null, squeeze: false, notes: [] },
+    volatility: { atr: null, atrPct: null, bollingerWidthPct: null, squeeze: false, squeezeJustFired: false, notes: [] },
     levels: [],
     fib: null,
     patterns: [],
@@ -375,6 +495,7 @@ export function analyzeImageOnly(heuristics: ImageHeuristics): AnalysisResult {
     periodHighLow: null,
     relativeStrength: null,
     backtest: null,
+    higherTimeframeContext: null,
     imageOnly: heuristics,
   };
 }

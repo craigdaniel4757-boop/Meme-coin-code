@@ -4,11 +4,18 @@ import { useEffect, useRef } from 'react';
 import { anchoredVwap, sma } from '@/lib/indicators';
 import type { Bar, Level } from '@/lib/types';
 
-export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Level[] }) {
+/**
+ * `bars` is the full (potentially multi-year) history used for indicator warm-up;
+ * `displayBars` is the trailing, timeframe-appropriate slice actually charted. Overlays are
+ * computed from the full series (so SMA200 etc. are correct) but trimmed to the display
+ * window before being handed to the chart, so panning/zooming stays focused on what the user
+ * selected instead of `fitContent()` zooming out to years of history.
+ */
+export default function PriceChart({ bars, displayBars, levels }: { bars: Bar[]; displayBars: Bar[]; levels: Level[] }) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!containerRef.current || bars.length === 0) return;
+    if (!containerRef.current || displayBars.length === 0) return;
     let disposed = false;
     let chart: import('lightweight-charts').IChartApi | null = null;
     let resizeObserver: ResizeObserver | null = null;
@@ -42,7 +49,7 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
         wickDownColor: '#ef4444',
       });
       candleSeries.setData(
-        bars.map((b) => ({
+        displayBars.map((b) => ({
           time: b.time as import('lightweight-charts').UTCTimestamp,
           open: b.open,
           high: b.high,
@@ -50,6 +57,9 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
           close: b.close,
         })),
       );
+
+      const displayStart = Math.max(0, bars.length - displayBars.length);
+      const trimToDisplay = (values: (number | null)[]) => values.slice(displayStart);
 
       const closes = bars.map((b) => b.close);
       const overlays: Array<{ period: number; color: string }> = [
@@ -59,10 +69,10 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
       ];
       for (const { period, color } of overlays) {
         if (bars.length < period) continue;
-        const values = sma(closes, period);
+        const values = trimToDisplay(sma(closes, period));
         const lineSeries = chart.addLineSeries({ color, lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
         lineSeries.setData(
-          bars
+          displayBars
             .map((b, i) => ({ time: b.time as import('lightweight-charts').UTCTimestamp, value: values[i] ?? null }))
             .filter(
               (p): p is { time: import('lightweight-charts').UTCTimestamp; value: number } =>
@@ -71,7 +81,7 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
         );
       }
 
-      const vwapValues = anchoredVwap(bars, 0);
+      const vwapValues = trimToDisplay(anchoredVwap(bars, displayStart));
       const vwapSeries = chart.addLineSeries({
         color: '#22d3ee',
         lineWidth: 1,
@@ -80,7 +90,7 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
         lastValueVisible: false,
       });
       vwapSeries.setData(
-        bars
+        displayBars
           .map((b, i) => ({ time: b.time as import('lightweight-charts').UTCTimestamp, value: vwapValues[i] ?? null }))
           .filter(
             (p): p is { time: import('lightweight-charts').UTCTimestamp; value: number } => p.value !== null,
@@ -114,7 +124,7 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
       resizeObserver?.disconnect();
       chart?.remove();
     };
-  }, [bars, levels]);
+  }, [bars, displayBars, levels]);
 
   return <div ref={containerRef} className="w-full overflow-hidden rounded-lg" />;
 }

@@ -72,36 +72,58 @@ export default function MethodologyPage() {
               licensed commercial data feeds. They are usually reliable but can occasionally
               lag, rate-limit, or be unavailable — when both fail, ChartPilot tells you plainly
               and falls back to the screenshot-only visual estimate instead of pretending to
-              have data it doesn't.
+              have data it doesn't. For the daily timeframes (1M/3M/6M/1Y), both sources are
+              fetched and their latest closes compared: if they disagree by more than 2%, the
+              result page says so and confidence is reduced, rather than silently trusting
+              whichever happened to respond first. Responses are cached for 60 seconds per
+              symbol/timeframe so repeated requests don't hammer either free source.
+            </p>
+            <p>
+              ChartPilot also fetches far more history than it displays — up to roughly 6 years
+              of daily bars — even when you've selected a short display window like 1M. That's
+              purely so indicators that mathematically need a long lookback (a 200-day moving
+              average, ADX, a statistically meaningful backtest sample) have one; the chart itself
+              still shows only the timeframe you picked. This is exactly how professional
+              charting platforms work — you can view a 1-month candlestick chart while the
+              platform still shows a 200-day moving average computed from data outside the
+              visible window.
             </p>
           </Section>
 
           <Section title="3. The technical-analysis engine">
             <p>Once real bars are available, ChartPilot computes, using standard textbook formulas:</p>
             <ul className="list-disc space-y-1.5 pl-5">
-              <li><strong className="text-slate-300">Trend</strong> — SMA 20/50/200 stack plus swing-high/swing-low structure (higher-highs/higher-lows vs. lower-highs/lower-lows), detected via a fractal swing-point method, weighted by ADX/DMI(14) trend-strength conviction.</li>
-              <li><strong className="text-slate-300">Momentum</strong> — RSI(14) and Stochastic %K/%D with Wilder/standard smoothing, MACD(12,26,9) with crossover detection, On-Balance Volume trend, and RSI/MACD/OBV divergence (three independent confirmations, not just one).</li>
-              <li><strong className="text-slate-300">Volatility</strong> — ATR(14) and Bollinger Bands(20, 2σ), including squeeze detection (band width near recent lows).</li>
-              <li><strong className="text-slate-300">Support/resistance</strong> — swing highs/lows clustered into zones by proximity, scored by touch count and recency, plus an anchored VWAP as a volume-weighted fair-value reference and 52-week/period high-low proximity.</li>
-              <li><strong className="text-slate-300">Chart patterns</strong> — double top/bottom, resistance/support breakouts (with volume confirmation where available), ascending/descending/symmetrical triangles (via linear-regression slope of swing highs vs. lows), head &amp; shoulders (and inverse), bull/bear flags, and Bollinger squeezes — each reported with its own confidence.</li>
+              <li><strong className="text-slate-300">Trend</strong> — SMA 20/50/200 stack plus swing-high/swing-low structure (higher-highs/higher-lows vs. lower-highs/lower-lows), detected via a fractal swing-point method, weighted by ADX/DMI(14) trend-strength conviction and Ichimoku cloud position.</li>
+              <li><strong className="text-slate-300">Momentum</strong> — RSI(14), Stochastic %K/%D, and Rate of Change(12) blended together, MACD(12,26,9) with crossover detection, On-Balance Volume trend and Chaikin Money Flow, and RSI/MACD/OBV divergence (three independent confirmations, not just one).</li>
+              <li><strong className="text-slate-300">Volatility</strong> — ATR(14), Bollinger Bands(20, 2σ), and Keltner Channels(20, 1.5×ATR) together, including the real "TTM Squeeze" (Bollinger pinched inside Keltner) and a distinct flag for the bar it releases.</li>
+              <li><strong className="text-slate-300">Support/resistance</strong> — swing highs/lows clustered into zones by proximity, scored by touch count and recency; an anchored VWAP as a volume-weighted fair-value reference (anchored to the displayed window, not the full fetch history); classic floor pivot points off the last session; and 52-week/period high-low proximity.</li>
+              <li><strong className="text-slate-300">Chart patterns</strong> — double top/bottom (reporting only the single most recent instance, not every overlapping swing pair), resistance/support breakouts (with volume confirmation where available), ascending/descending/symmetrical triangles (via linear-regression slope of swing highs vs. lows), head &amp; shoulders (and inverse), bull/bear flags, session gaps, and squeeze fires — each reported with its own confidence.</li>
               <li><strong className="text-slate-300">Candlestick patterns</strong> — bullish/bearish engulfing, hammer, shooting star, doji, and morning/evening star, checked on the real OHLC bars (not just candle color) at the most recent bar(s).</li>
+              <li><strong className="text-slate-300">Ichimoku Kinko Hyo</strong> — Tenkan-sen, Kijun-sen, and both Senkou spans, read as price-vs-cloud position (above/inside/below). Traditionally the Senkou spans are plotted 26 periods ahead; this implementation deliberately doesn't shift them (nothing here renders the classic visual cloud), so only the numeric position read is used — the standard simplification for a non-visual Ichimoku signal.</li>
+              <li><strong className="text-slate-300">Parabolic SAR</strong> — Wilder's trailing stop-and-reverse; a trend flip is the signal, and it's genuinely prone to whipsaws in choppy/sideways conditions, same as it is on any platform.</li>
               <li><strong className="text-slate-300">Fibonacci retracement</strong> — 23.6/38.2/50/61.8/78.6% levels off the most recent significant swing.</li>
-              <li><strong className="text-slate-300">Relative strength</strong> — this symbol's return over the window vs. SPY's return over the same window, a staple of professional technical analysis that a single-chart read misses entirely.</li>
+              <li><strong className="text-slate-300">Relative strength</strong> — this symbol's return over the displayed window vs. SPY's return over the same window, a staple of professional technical analysis that a single-chart read misses entirely.</li>
+              <li><strong className="text-slate-300">Multi-timeframe confluence</strong> — for the intraday 1D/5D views specifically, a separate daily-bar fetch checks whether the daily trend agrees with the intraday read; agreement/conflict adjusts confidence.</li>
             </ul>
             <p>
               All of this math lives in this project's <code className="rounded bg-panel2 px-1 py-0.5 text-[12px]">lib/</code> folder as
-              plain, readable functions — there is no hidden model call in this step.
+              plain, readable functions with a Vitest unit-test suite (<code className="rounded bg-panel2 px-1 py-0.5 text-[12px]">*.test.ts</code>) — there is no hidden model call in this step.
             </p>
           </Section>
 
           <Section title="4. Turning readings into a score">
             <p>
-              Trend, momentum (RSI blended with Stochastic), MACD, pattern, and relative-strength
-              signals are combined into a single −100…+100 score using fixed, documented weights
-              (trend 32%, momentum 18%, MACD 15%, patterns 28%, relative strength 7%). The score
-              maps to a Strong Bearish → Bearish → Neutral → Bullish → Strong Bullish label.
-              There is no machine-learning model here to overfit or misbehave silently — you can
-              read the exact formula in <code className="rounded bg-panel2 px-1 py-0.5 text-[12px]">lib/scorer.ts</code>.
+              Trend, momentum (RSI/Stochastic/ROC blended), MACD, pattern, relative-strength,
+              Ichimoku cloud position, Parabolic SAR, and Chaikin Money Flow signals are combined
+              into a single −100…+100 score using fixed, documented weights (trend 26%, momentum
+              16%, MACD 12%, patterns 24%, relative strength 6%, Ichimoku 8%, SAR 4%, CMF 4%) —
+              the newer, narrower signals are deliberately weighted lighter so they nudge the
+              read rather than dominate it. The score maps to a Strong Bearish → Bearish →
+              Neutral → Bullish → Strong Bullish label. There is no machine-learning model here
+              to overfit or misbehave silently — you can read the exact formula in{' '}
+              <code className="rounded bg-panel2 px-1 py-0.5 text-[12px]">lib/scorer.ts</code>.
+              Pivot points and the historical signal check (below) are deliberately <em>not</em>{' '}
+              part of this formula — they're shown as context, not folded into the number.
             </p>
           </Section>
 
@@ -109,25 +131,29 @@ export default function MethodologyPage() {
             <p>
               Confidence starts from data quality (real intraday/daily data scores much higher
               than a screenshot-only read), then adjusts for how much history was available, how
-              many signals agree with each other, and whether ADX shows a genuinely trending
-              market (a boost) or a choppy, low-conviction one (a penalty). It is deliberately
-              capped well below 100% — screenshot-only reads are capped at 40%, and even a full,
-              real-data read is capped at 92% — because no free (or paid) tool can be certain
-              about where a price goes next. A high number here means "the available evidence
-              points one direction fairly consistently," never "this will happen."
+              many signals agree with each other, whether ADX shows a genuinely trending market
+              (a boost) or a choppy, low-conviction one (a penalty), whether the daily and
+              intraday trends agree on 1D/5D views, and whether the two free data sources agree
+              on the latest close. It is deliberately capped well below 100% — screenshot-only
+              reads are capped at 40%, and even a full, real-data read is capped at 92% —
+              because no free (or paid) tool can be certain about where a price goes next. A
+              high number here means "the available evidence points one direction fairly
+              consistently," never "this will happen."
             </p>
           </Section>
 
           <Section title="6. Historical signal check — a real empirical test, kept honest">
             <p>
-              Beyond formula-trust, ChartPilot replays one small, mechanical, well-defined signal
-              — an RSI(14) mean-reversion crossing (back above 30, or back below 70) — over the
-              exact bars already fetched for the chart on screen, and reports how it actually
+              Beyond formula-trust, ChartPilot replays three small, mechanical, well-defined
+              signals — an RSI(14) mean-reversion crossing (back above 30, or back below 70), an
+              SMA50/200 golden/death cross, and a MACD signal-line crossover — over the exact
+              bars already fetched for the chart on screen, and reports how each actually
               performed: how many times it fired, what share of the time price moved favorably
-              over the next 5 bars, and by how much on average. There's no look-ahead bias built
-              in — a signal only ever looks at data up to the bar it fires on, and its outcome is
-              only ever measured using bars strictly after that, all of which are already
-              historical by the time the check runs.
+              afterward, and by how much on average. There's no look-ahead bias built in — a
+              signal only ever looks at data up to the bar it fires on, and its outcome is only
+              ever measured using bars strictly after that, all of which are already historical
+              by the time the check runs (this property has its own unit tests in{' '}
+              <code className="rounded bg-panel2 px-1 py-0.5 text-[12px]">lib/backtest.test.ts</code>).
             </p>
             <p>
               This is deliberately <em>not</em> one of the score's weighted inputs — it's context
@@ -141,12 +167,15 @@ export default function MethodologyPage() {
 
           <Section title="7. Limitations, honestly">
             <ul className="list-disc space-y-1.5 pl-5">
-              <li>Free data sources can lag, be incomplete, or occasionally be wrong.</li>
+              <li>Free data sources can lag, be incomplete, or occasionally be wrong — cross-validation catches disagreement between the two sources, not errors they happen to share.</li>
               <li>OCR ticker detection can misread a symbol — always verify it.</li>
               <li>Screenshot-only visual analysis is a coarse heuristic, not real data extraction.</li>
               <li>Chart-shape and candlestick pattern detection use geometric rules, not a trained classifier — they'll miss unusual variants and can occasionally fire on look-alikes.</li>
-              <li>The historical signal check tests one rule on one symbol's own (often short) history — it is not a rigorous multi-symbol backtest and shouldn't be read as one.</li>
-              <li>Relative strength compares against a single benchmark (SPY) — it says nothing about sector-specific or international context.</li>
+              <li>Ichimoku's Senkou spans aren't visually shifted forward here (see above) — only the numeric cloud-position read is used, a simplification.</li>
+              <li>Parabolic SAR whipsaws in sideways markets by design — a flip is a mechanical trigger, not a guarantee of a new trend.</li>
+              <li>Session-gap detection only makes sense on daily bars and is skipped for intraday reads.</li>
+              <li>The historical signal check tests three rules on one symbol's own (often short) history — it is not a rigorous multi-symbol backtest and shouldn't be read as one.</li>
+              <li>Relative strength and multi-timeframe confluence compare against a single benchmark (SPY) and a single higher timeframe respectively — neither says anything about sector-specific or international context.</li>
               <li>Technical analysis describes patterns in past price action; it does not predict the future, and markets can and do invalidate any setup.</li>
               <li>This tool has no knowledge of your finances, goals, or risk tolerance, and does not account for fundamentals, news, or macro events.</li>
             </ul>

@@ -77,21 +77,34 @@ export default function TrackRecordPanel({
         </div>
       )}
 
-      {backtest && (
-        <div>
-          <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">
-            Historical signal check (this exact chart)
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <BacktestRow stat={backtest.rsiOversoldBounce} />
-            <BacktestRow stat={backtest.rsiOverboughtFade} />
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted">
-            Small, mechanical replay of one rule over this chart's own history — not a
-            recommendation, and a small sample is not a reliable edge.
-          </p>
-        </div>
-      )}
+      {backtest &&
+        (() => {
+          const stats = [
+            backtest.rsiOversoldBounce,
+            backtest.rsiOverboughtFade,
+            backtest.maCrossBullish,
+            backtest.maCrossBearish,
+            backtest.macdCrossBullish,
+            backtest.macdCrossBearish,
+          ].filter((s) => s.occurrences > 0);
+          if (stats.length === 0) return null;
+          return (
+            <div>
+              <div className="mb-1.5 text-xs font-medium uppercase tracking-wide text-muted">
+                Historical signal check (this exact chart)
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                {stats.map((stat) => (
+                  <BacktestRow key={stat.label} stat={stat} />
+                ))}
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted">
+                Small, mechanical replay of each rule over this chart's own history — not a
+                recommendation, and a small sample is not a reliable edge.
+              </p>
+            </div>
+          );
+        })()}
 
       {!relativeStrength && !backtest && (
         <p className="text-sm text-muted">Add a ticker symbol to unlock relative-strength and track-record context.</p>

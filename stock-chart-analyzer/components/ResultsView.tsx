@@ -3,6 +3,7 @@ import SignalBadge from './SignalBadge';
 import ConfidenceMeter from './ConfidenceMeter';
 import IndicatorGrid from './IndicatorGrid';
 import LevelsTable from './LevelsTable';
+import PivotTable from './PivotTable';
 import PlanSteps from './PlanSteps';
 import PriceChart from './PriceChart';
 import TrackRecordPanel from './TrackRecordPanel';
@@ -38,14 +39,26 @@ export default function ResultsView({
       >
         {quoteSeries ? (
           <>
-            Live data via <span className="font-medium capitalize">{quoteSeries.source}</span> —{' '}
-            {result.sampleSize} {quoteSeries.interval} bars for{' '}
-            <span className="font-mono">{quoteSeries.resolvedSymbol}</span>.
+            Live data via <span className="font-medium capitalize">{quoteSeries.source}</span> —
+            analyzed on {result.sampleSize} {quoteSeries.interval} bars for{' '}
+            <span className="font-mono">{quoteSeries.resolvedSymbol}</span>
+            {quoteSeries.displayBars.length !== result.sampleSize
+              ? ` (charting the most recent ${quoteSeries.displayBars.length})`
+              : ''}
+            .
           </>
         ) : (
           <>Screenshot-only visual estimate — no verified price data was used. Add a ticker symbol for a real, data-backed analysis.</>
         )}
       </div>
+
+      {result.crossValidated && !result.crossValidated.agrees && (
+        <div className="rounded-lg border border-neutral/30 bg-neutral/5 px-3.5 py-2.5 text-xs text-neutral">
+          Heads up: {quoteSeries?.source} and {result.crossValidated.otherSource} disagree on the
+          latest close by {result.crossValidated.deltaPct.toFixed(1)}% — one of the two free
+          sources may be lagging. Confidence below has already been reduced to reflect this.
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-border bg-panel p-5 shadow-panel">
         <div className="flex items-center gap-3">
@@ -57,10 +70,11 @@ export default function ResultsView({
 
       {quoteSeries && (
         <div className="rounded-xl border border-border bg-panel p-3 shadow-panel">
-          <PriceChart bars={quoteSeries.bars} levels={result.levels} />
+          <PriceChart bars={quoteSeries.bars} displayBars={quoteSeries.displayBars} levels={result.levels} />
           <p className="mt-2 px-1 text-[11px] text-muted">
             Yellow = SMA 20 · Blue = SMA 50 · Purple = SMA 200 · Cyan dotted = VWAP · dashed lines
-            = detected support/resistance zones.
+            = detected support/resistance zones. Moving averages are computed on a longer history
+            than shown here, so they can appear before their full lookback fits on screen.
           </p>
         </div>
       )}
@@ -81,11 +95,17 @@ export default function ResultsView({
         </div>
       )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
         <div className="rounded-xl border border-border bg-panel p-5 shadow-panel">
           <h3 className="mb-3 text-sm font-semibold text-slate-100">Support &amp; resistance</h3>
           <LevelsTable levels={result.levels} />
         </div>
+        {result.indicators?.pivots && (
+          <div className="rounded-xl border border-border bg-panel p-5 shadow-panel">
+            <h3 className="mb-3 text-sm font-semibold text-slate-100">Pivot points</h3>
+            <PivotTable pivots={result.indicators.pivots} />
+          </div>
+        )}
         <div className="rounded-xl border border-border bg-panel p-5 shadow-panel">
           <h3 className="mb-3 text-sm font-semibold text-slate-100">Pattern signals</h3>
           {result.patterns.length === 0 ? (

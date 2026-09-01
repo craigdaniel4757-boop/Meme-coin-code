@@ -195,9 +195,16 @@ export function detectBreakout(bars: Bar[], levels: Level[]): PatternFlag[] {
   return flags;
 }
 
+/**
+ * Volatility context, including the real "TTM Squeeze": Bollinger Bands pinched *inside* the
+ * Keltner Channels (not just a low band-width percentile) — the well-known John Carter
+ * definition, with a distinct `squeezeJustFired` flag for the bar the bands expand back outside
+ * the channels, which is the more actionable moment than the squeeze itself.
+ */
 export function volatilityReading(
   atrSeries: (number | null)[],
   bollinger: { upper: (number | null)[]; middle: (number | null)[]; lower: (number | null)[] },
+  keltner: { upper: (number | null)[]; lower: (number | null)[] },
   lastClose: number,
 ): VolatilityReading {
   const notes: string[] = [];
@@ -205,31 +212,74 @@ export function volatilityReading(
   const atrPct = atrVal !== null && lastClose > 0 ? (atrVal / lastClose) * 100 : null;
 
   const widths: number[] = [];
-  for (let i = 0; i < bollinger.upper.length; i++) {
+  const n = bollinger.upper.length;
+  const squeezeOn: boolean[] = new Array(n).fill(false);
+  for (let i = 0; i < n; i++) {
     const u = bollinger.upper[i];
     const l = bollinger.lower[i];
     const m = bollinger.middle[i];
     if (u != null && l != null && m != null && m !== 0) widths.push(((u - l) / m) * 100);
+
+    const ku = keltner.upper[i];
+    const kl = keltner.lower[i];
+    if (u != null && l != null && ku != null && kl != null) {
+      squeezeOn[i] = u < ku && l > kl;
+    }
   }
   const currentWidth = widths.length > 0 ? widths[widths.length - 1]! : null;
-  let squeeze = false;
-  if (widths.length >= 20 && currentWidth !== null) {
-    const recent = widths.slice(-60);
-    const sortedWidths = [...recent].sort((a, b) => a - b);
-    const percentileRank =
-      sortedWidths.findIndex((w) => w >= currentWidth) / sortedWidths.length;
-    squeeze = percentileRank <= 0.15;
-    if (squeeze) {
-      notes.push(
-        'Bollinger Band width is near its lowest in the visible history — volatility is compressed and often precedes a sharp move.',
-      );
-    }
+  const squeeze = squeezeOn[n - 1] ?? false;
+  const squeezeJustFired = n >= 2 ? squeezeOn[n - 2] === true && squeezeOn[n - 1] === false : false;
+
+  if (squeeze) {
+    notes.push(
+      'Bollinger Bands are pinched inside the Keltner Channels ("TTM squeeze") — volatility is compressed and often precedes a sharp expansion move.',
+    );
+  } else if (squeezeJustFired) {
+    notes.push(
+      'A volatility squeeze just released (Bollinger Bands expanded back outside the Keltner Channels) — often marks the start of the expansion move.',
+    );
   }
   if (atrPct !== null) {
     notes.push(`Average True Range is about ${atrPct.toFixed(1)}% of price (14-period).`);
   }
 
-  return { atr: atrVal, atrPct, bollingerWidthPct: currentWidth, squeeze, notes };
+  return { atr: atrVal, atrPct, bollingerWidthPct: currentWidth, squeeze, squeezeJustFired, notes };
+}
+
+/** Session gaps (open vs. prior close with no range overlap) at the most recent bar. Daily-bar
+ * concept only — meaningless between intraday bars within the same session. */
+export function detectGap(bars: Bar[], thresholdPct = 1): PatternFlag[] {
+  const flags: PatternFlag[] = [];
+  const n = bars.length;
+  if (n < 2) return flags;
+  const last = bars[n - 1]!;
+  const prev = bars[n - 2]!;
+  if (prev.close <= 0) return flags;
+
+  if (last.open > prev.high) {
+    const gapPct = ((last.open - prev.close) / prev.close) * 100;
+    if (gapPct >= thresholdPct) {
+      flags.push({
+        id: 'gap-up',
+        label: 'Gap up',
+        bias: 'bullish',
+        confidence: 0.4,
+        description: `Opened ${gapPct.toFixed(1)}% above the prior close with no overlap — an unfilled gap can act as support on a pullback, or get filled if buying doesn't follow through.`,
+      });
+    }
+  } else if (last.open < prev.low) {
+    const gapPct = ((prev.close - last.open) / prev.close) * 100;
+    if (gapPct >= thresholdPct) {
+      flags.push({
+        id: 'gap-down',
+        label: 'Gap down',
+        bias: 'bearish',
+        confidence: 0.4,
+        description: `Opened ${gapPct.toFixed(1)}% below the prior close with no overlap — an unfilled gap can act as resistance on a bounce, or get filled if selling doesn't follow through.`,
+      });
+    }
+  }
+  return flags;
 }
 
 type DivergenceResult = 'bullish' | 'bearish' | 'none';

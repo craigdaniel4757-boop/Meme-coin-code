@@ -26,6 +26,10 @@ export default function IndicatorGrid({
   const obvTone = momentum.obvTrend === 'rising' ? 'bull' : momentum.obvTrend === 'falling' ? 'bear' : undefined;
   const vwapTone = indicators.vwap !== null ? (indicators.lastClose >= indicators.vwap ? 'bull' : 'bear') : undefined;
   const adxTone = indicators.dmi && indicators.dmi.adx >= 25 ? 'neutral' : undefined;
+  const cloudTone = indicators.ichimoku?.cloudPosition === 'above' ? 'bull' : indicators.ichimoku?.cloudPosition === 'below' ? 'bear' : undefined;
+  const sarTone = indicators.sar?.trend === 'up' ? 'bull' : indicators.sar?.trend === 'down' ? 'bear' : undefined;
+  const cmfTone = (indicators.cmf ?? 0) > 0.1 ? 'bull' : (indicators.cmf ?? 0) < -0.1 ? 'bear' : undefined;
+  const rocTone = (indicators.roc ?? 0) > 0 ? 'bull' : (indicators.roc ?? 0) < 0 ? 'bear' : undefined;
 
   return (
     <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -49,6 +53,14 @@ export default function IndicatorGrid({
         value={volatility.bollingerWidthPct !== null ? `${volatility.bollingerWidthPct.toFixed(1)}%` : '—'}
         tone={volatility.squeeze ? 'neutral' : undefined}
       />
+      <Stat
+        label="Ichimoku cloud"
+        value={indicators.ichimoku ? indicators.ichimoku.cloudPosition : '—'}
+        tone={cloudTone}
+      />
+      <Stat label="Parabolic SAR" value={indicators.sar ? `${formatPrice(indicators.sar.value)} (${indicators.sar.trend})` : '—'} tone={sarTone} />
+      <Stat label="Chaikin Money Flow" value={indicators.cmf !== null ? indicators.cmf.toFixed(2) : '—'} tone={cmfTone} />
+      <Stat label="Rate of Change (12)" value={indicators.roc !== null ? `${indicators.roc >= 0 ? '+' : ''}${indicators.roc.toFixed(1)}%` : '—'} tone={rocTone} />
     </div>
   );
 }

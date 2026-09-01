@@ -7,7 +7,12 @@
 
 import { formatPrice } from './patterns';
 import { nearestLevel } from './swings';
-import type { AnalysisResult, Horizon, Plan, PlanStep, Signal, Timeframe } from './types';
+import type { AnalysisResult, BacktestSignalStat, Horizon, Plan, PlanStep, Signal, Timeframe } from './types';
+
+function describeBacktestStat(stat: BacktestSignalStat, favorableDirectionWord: 'higher' | 'lower'): string | null {
+  if (stat.occurrences < 3 || stat.hitRatePct === null || stat.avgForwardReturnPct === null) return null;
+  return `"${stat.label}" fired ${stat.occurrences} times in the visible history, and price was ${favorableDirectionWord} ${stat.horizon} bars later ${stat.hitRatePct.toFixed(0)}% of the time (average ${stat.avgForwardReturnPct >= 0 ? '+' : ''}${stat.avgForwardReturnPct.toFixed(1)}% in the signal's favor). Small sample — a pattern, not a promise.`;
+}
 
 const SIGNAL_LABEL: Record<Signal, string> = {
   'strong-bullish': 'Strong bullish lean',
@@ -74,6 +79,13 @@ function buildContextStep(result: AnalysisResult, timeframe: Timeframe, symbol: 
     }
   }
 
+  if (result.higherTimeframeContext) {
+    const htf = result.higherTimeframeContext;
+    parts.push(
+      `Daily-timeframe trend context: ${htf.direction} — ${htf.agrees ? 'this agrees with' : 'this conflicts with'} the intraday read above, which ${htf.agrees ? 'adds' : 'reduces'} conviction.`,
+    );
+  }
+
   return { title: 'Trend context', body: parts.join(' ') };
 }
 
@@ -91,17 +103,15 @@ function buildMomentumStep(result: AnalysisResult): PlanStep {
 }
 
 function buildLevelsStep(result: AnalysisResult): PlanStep {
-  if (result.levels.length === 0) {
+  if (result.dataQuality === 'image-only') {
     return {
       title: 'Key levels to watch',
-      body: result.dataQuality === 'image-only'
-        ? 'Support/resistance levels require real price history to calculate precisely — add a ticker symbol to see exact levels.'
-        : 'No clean, well-tested support or resistance zones stood out in the visible history — price has been trading without an obvious repeated pivot.',
+      body: 'Support/resistance levels require real price history to calculate precisely — add a ticker symbol to see exact levels.',
     };
   }
+  const parts: string[] = [];
   const resistances = result.levels.filter((l) => l.kind === 'resistance').slice(0, 2);
   const supports = result.levels.filter((l) => l.kind === 'support').slice(0, 2);
-  const parts: string[] = [];
   if (resistances.length) {
     parts.push(
       `Resistance: ${resistances.map((l) => `~${formatPrice(l.price)} (${l.touches} touch${l.touches > 1 ? 'es' : ''})`).join(', ')}.`,
@@ -112,12 +122,21 @@ function buildLevelsStep(result: AnalysisResult): PlanStep {
       `Support: ${supports.map((l) => `~${formatPrice(l.price)} (${l.touches} touch${l.touches > 1 ? 'es' : ''})`).join(', ')}.`,
     );
   }
+  if (parts.length === 0) {
+    parts.push('No clean, well-tested support or resistance zones stood out in the visible history — price has been trading without an obvious repeated pivot.');
+  }
   if (result.fib && result.fib.length) {
     const mid = result.fib.find((f) => f.ratio === 0.5);
     const golden = result.fib.find((f) => f.ratio === 0.618);
     if (mid && golden) {
       parts.push(`Fibonacci retracement of the latest swing puts the 50% level near ${formatPrice(mid.price)} and the 61.8% "golden" level near ${formatPrice(golden.price)}.`);
     }
+  }
+  if (result.indicators?.pivots) {
+    const p = result.indicators.pivots;
+    parts.push(
+      `Classic floor pivots off the last session: pivot ~${formatPrice(p.pp)}, R1 ~${formatPrice(p.r1)}, S1 ~${formatPrice(p.s1)}.`,
+    );
   }
   return { title: 'Key levels to watch', body: parts.join(' ') };
 }
@@ -150,17 +169,20 @@ function buildTrackRecordStep(result: AnalysisResult): PlanStep {
     );
   }
 
-  const bounce = result.backtest?.rsiOversoldBounce;
-  if (bounce && bounce.occurrences >= 3 && bounce.hitRatePct !== null && bounce.avgForwardReturnPct !== null) {
-    parts.push(
-      `Historical check on this exact chart: "${bounce.label}" fired ${bounce.occurrences} times in the visible history, and price was higher ${bounce.horizon} bars later ${bounce.hitRatePct.toFixed(0)}% of the time (average ${bounce.avgForwardReturnPct >= 0 ? '+' : ''}${bounce.avgForwardReturnPct.toFixed(1)}%). Small sample — a pattern, not a promise.`,
-    );
-  }
-  const fade = result.backtest?.rsiOverboughtFade;
-  if (fade && fade.occurrences >= 3 && fade.hitRatePct !== null && fade.avgForwardReturnPct !== null) {
-    parts.push(
-      `Historical check: "${fade.label}" fired ${fade.occurrences} times in the visible history, and price was lower ${fade.horizon} bars later ${fade.hitRatePct.toFixed(0)}% of the time (average ${fade.avgForwardReturnPct >= 0 ? '+' : ''}${fade.avgForwardReturnPct.toFixed(1)}% in the fade's favor). Small sample — a pattern, not a promise.`,
-    );
+  if (result.backtest) {
+    const bt = result.backtest;
+    const checks: Array<[BacktestSignalStat, 'higher' | 'lower']> = [
+      [bt.rsiOversoldBounce, 'higher'],
+      [bt.rsiOverboughtFade, 'lower'],
+      [bt.maCrossBullish, 'higher'],
+      [bt.maCrossBearish, 'lower'],
+      [bt.macdCrossBullish, 'higher'],
+      [bt.macdCrossBearish, 'lower'],
+    ];
+    for (const [stat, direction] of checks) {
+      const line = describeBacktestStat(stat, direction);
+      if (line) parts.push(line);
+    }
   }
 
   if (parts.length === 0) {

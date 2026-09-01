@@ -3,7 +3,7 @@
 // same inputs. All functions return `null` where there isn't enough history, rather than a
 // misleading zero.
 
-import type { Bar } from './types';
+import type { Bar, PivotLevels } from './types';
 
 export function sma(values: number[], period: number): (number | null)[] {
   const out: (number | null)[] = new Array(values.length).fill(null);
@@ -322,4 +322,172 @@ export function anchoredVwap(bars: Bar[], anchorIndex = 0): (number | null)[] {
     out[i] = cumVol > 0 ? cumPV / cumVol : null;
   }
   return out;
+}
+
+export interface KeltnerResult {
+  upper: (number | null)[];
+  middle: (number | null)[];
+  lower: (number | null)[];
+}
+
+/** Keltner Channels: an EMA midline ± a multiple of ATR. Paired with Bollinger Bands, this is
+ * what the well-known "TTM Squeeze" actually compares (see lib/patterns.ts). */
+export function keltnerChannels(closes: number[], atrSeries: (number | null)[], period = 20, mult = 1.5): KeltnerResult {
+  const middle = ema(closes, period);
+  const upper: (number | null)[] = middle.map((m, i) => {
+    const a = atrSeries[i] ?? null;
+    return m !== null && a !== null ? m + mult * a : null;
+  });
+  const lower: (number | null)[] = middle.map((m, i) => {
+    const a = atrSeries[i] ?? null;
+    return m !== null && a !== null ? m - mult * a : null;
+  });
+  return { upper, middle, lower };
+}
+
+export interface IchimokuResult {
+  tenkan: (number | null)[];
+  kijun: (number | null)[];
+  senkouA: (number | null)[];
+  senkouB: (number | null)[];
+}
+
+function highLowMidpoint(bars: Bar[], period: number): (number | null)[] {
+  const n = bars.length;
+  const out: (number | null)[] = new Array(n).fill(null);
+  for (let i = period - 1; i < n; i++) {
+    let hi = -Infinity;
+    let lo = Infinity;
+    for (let j = i - period + 1; j <= i; j++) {
+      hi = Math.max(hi, bars[j]!.high);
+      lo = Math.min(lo, bars[j]!.low);
+    }
+    out[i] = (hi + lo) / 2;
+  }
+  return out;
+}
+
+/**
+ * Ichimoku Kinko Hyo's four core lines (Tenkan-sen, Kijun-sen, Senkou Span A/B). Traditionally
+ * the Senkou spans are plotted 26 periods *ahead* of the price they're derived from; this
+ * implementation deliberately returns them aligned to their originating bar instead (no forward
+ * shift) since nothing here renders the classic shifted "cloud" visually — only the numeric
+ * cloud-position read (current close vs. current Senkou A/B) is used, which is the standard
+ * simplification for a non-visual Ichimoku signal.
+ */
+export function ichimoku(bars: Bar[], tenkanPeriod = 9, kijunPeriod = 26, senkouBPeriod = 52): IchimokuResult {
+  const tenkan = highLowMidpoint(bars, tenkanPeriod);
+  const kijun = highLowMidpoint(bars, kijunPeriod);
+  const senkouA: (number | null)[] = tenkan.map((t, i) => {
+    const k = kijun[i] ?? null;
+    return t !== null && k !== null ? (t + k) / 2 : null;
+  });
+  const senkouB = highLowMidpoint(bars, senkouBPeriod);
+  return { tenkan, kijun, senkouA, senkouB };
+}
+
+export interface SarPoint {
+  value: number;
+  trend: 'up' | 'down';
+}
+
+/** Wilder's Parabolic SAR — a trailing stop-and-reverse level; a flip in `trend` is the signal. */
+export function parabolicSar(bars: Bar[], step = 0.02, maxStep = 0.2): (SarPoint | null)[] {
+  const n = bars.length;
+  const out: (SarPoint | null)[] = new Array(n).fill(null);
+  if (n < 2) return out;
+
+  let isUpTrend = bars[1]!.close >= bars[0]!.close;
+  let sar = isUpTrend ? bars[0]!.low : bars[0]!.high;
+  let ep = isUpTrend ? bars[0]!.high : bars[0]!.low;
+  let af = step;
+  out[0] = { value: sar, trend: isUpTrend ? 'up' : 'down' };
+
+  for (let i = 1; i < n; i++) {
+    const bar = bars[i]!;
+    let nextSar = sar + af * (ep - sar);
+
+    if (isUpTrend) {
+      const prevLow1 = bars[i - 1]!.low;
+      const prevLow2 = i >= 2 ? bars[i - 2]!.low : prevLow1;
+      nextSar = Math.min(nextSar, prevLow1, prevLow2);
+
+      if (bar.low < nextSar) {
+        isUpTrend = false;
+        nextSar = ep;
+        ep = bar.low;
+        af = step;
+      } else if (bar.high > ep) {
+        ep = bar.high;
+        af = Math.min(af + step, maxStep);
+      }
+    } else {
+      const prevHigh1 = bars[i - 1]!.high;
+      const prevHigh2 = i >= 2 ? bars[i - 2]!.high : prevHigh1;
+      nextSar = Math.max(nextSar, prevHigh1, prevHigh2);
+
+      if (bar.high > nextSar) {
+        isUpTrend = true;
+        nextSar = ep;
+        ep = bar.high;
+        af = step;
+      } else if (bar.low < ep) {
+        ep = bar.low;
+        af = Math.min(af + step, maxStep);
+      }
+    }
+
+    sar = nextSar;
+    out[i] = { value: sar, trend: isUpTrend ? 'up' : 'down' };
+  }
+
+  return out;
+}
+
+/** Chaikin Money Flow: volume-weighted accumulation/distribution over a rolling window,
+ * bounded roughly -1..1 — complements OBV's unbounded cumulative view. */
+export function chaikinMoneyFlow(bars: Bar[], period = 20): (number | null)[] {
+  const n = bars.length;
+  const out: (number | null)[] = new Array(n).fill(null);
+  const mfv: number[] = bars.map((b) => {
+    const range = b.high - b.low;
+    const multiplier = range === 0 ? 0 : (b.close - b.low - (b.high - b.close)) / range;
+    return multiplier * (b.volume ?? 0);
+  });
+  for (let i = period - 1; i < n; i++) {
+    let sumMfv = 0;
+    let sumVol = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      sumMfv += mfv[j]!;
+      sumVol += bars[j]!.volume ?? 0;
+    }
+    out[i] = sumVol > 0 ? sumMfv / sumVol : null;
+  }
+  return out;
+}
+
+/** Rate of Change: simple % momentum over `period` bars. */
+export function roc(closes: number[], period = 12): (number | null)[] {
+  const out: (number | null)[] = new Array(closes.length).fill(null);
+  for (let i = period; i < closes.length; i++) {
+    const prev = closes[i - period]!;
+    if (prev !== 0) out[i] = ((closes[i]! - prev) / prev) * 100;
+  }
+  return out;
+}
+
+/** Classic floor pivots off a single prior bar's high/low/close — popular short-term/day-trading
+ * reference levels, distinct from the swing-clustered support/resistance zones elsewhere. */
+export function classicPivotPoints(prevHigh: number, prevLow: number, prevClose: number): PivotLevels {
+  const pp = (prevHigh + prevLow + prevClose) / 3;
+  const range = prevHigh - prevLow;
+  return {
+    pp,
+    r1: 2 * pp - prevLow,
+    s1: 2 * pp - prevHigh,
+    r2: pp + range,
+    s2: pp - range,
+    r3: prevHigh + 2 * (pp - prevLow),
+    s3: prevLow - 2 * (prevHigh - pp),
+  };
 }

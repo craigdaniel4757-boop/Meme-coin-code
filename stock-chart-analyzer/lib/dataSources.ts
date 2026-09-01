@@ -6,6 +6,15 @@
 // on the 1D/5D timeframes, which Stooq's free tier doesn't provide).
 // Both are unauthenticated best-effort public endpoints, not paid/licensed data feeds — see the
 // methodology page for what that means for reliability.
+//
+// Two design choices worth calling out:
+// - `bars` carries far more history than the selected timeframe displays (see
+//   ANALYSIS_HISTORY_DAYS) so long-period indicators (SMA200, ADX, the backtest) have a real
+//   warm-up even when you're looking at a 1-month chart — exactly how a real charting platform
+//   computes a 200-day average while you're zoomed into a shorter window. `displayBars` is the
+//   timeframe-appropriate slice the chart actually renders.
+// - For daily timeframes, both sources are fetched and cross-checked against each other (not
+//   just failed-over) — a free way to catch a stale/wrong read from either one.
 
 import type { Bar, DataQuality, QuoteSeries, Timeframe } from './types';
 
@@ -22,19 +31,29 @@ export function isValidSymbol(symbol: string): boolean {
 interface TimeframePlan {
   yahooRange: string;
   yahooInterval: string;
-  stooqCutoffDays: number | null; // null = use full history returned
+  displayCutoffDays: number | null; // null = display everything fetched (intraday has nothing extra to trim)
 }
 
 const TIMEFRAME_PLAN: Record<Timeframe, TimeframePlan> = {
-  '1D': { yahooRange: '1d', yahooInterval: '5m', stooqCutoffDays: 5 },
-  '5D': { yahooRange: '5d', yahooInterval: '15m', stooqCutoffDays: 10 },
-  '1M': { yahooRange: '3mo', yahooInterval: '1d', stooqCutoffDays: 35 },
-  '3M': { yahooRange: '6mo', yahooInterval: '1d', stooqCutoffDays: 100 },
-  '6M': { yahooRange: '1y', yahooInterval: '1d', stooqCutoffDays: 195 },
-  '1Y': { yahooRange: '2y', yahooInterval: '1d', stooqCutoffDays: 380 },
+  '1D': { yahooRange: '1d', yahooInterval: '5m', displayCutoffDays: null },
+  '5D': { yahooRange: '5d', yahooInterval: '15m', displayCutoffDays: null },
+  '1M': { yahooRange: '3mo', yahooInterval: '1d', displayCutoffDays: 35 },
+  '3M': { yahooRange: '6mo', yahooInterval: '1d', displayCutoffDays: 100 },
+  '6M': { yahooRange: '1y', yahooInterval: '1d', displayCutoffDays: 195 },
+  '1Y': { yahooRange: '2y', yahooInterval: '1d', displayCutoffDays: 380 },
 };
 
-const FETCH_TIMEOUT_MS = 8000;
+/** How much daily history to keep for analysis, regardless of the selected display timeframe. */
+const ANALYSIS_HISTORY_DAYS = 1500; // ~6 years — generous SMA200/ADX/backtest warm-up, still a small payload
+const YAHOO_DAILY_ANALYSIS_RANGE = '5y';
+const FETCH_TIMEOUT_MS = 10000;
+const CACHE_TTL_MS = 60_000;
+
+function sliceTail(bars: Bar[], cutoffDays: number | null): Bar[] {
+  if (cutoffDays === null || bars.length === 0) return bars;
+  const lastTime = bars[bars.length - 1]!.time;
+  return bars.filter((b) => b.time >= lastTime - cutoffDays * 86400);
+}
 
 async function timedFetch(url: string, headers?: Record<string, string>): Promise<Response> {
   const controller = new AbortController();
@@ -57,9 +76,11 @@ async function timedFetch(url: string, headers?: Record<string, string>): Promis
 
 async function fetchYahoo(symbol: string, timeframe: Timeframe): Promise<QuoteSeries | null> {
   const plan = TIMEFRAME_PLAN[timeframe];
+  const isIntraday = plan.yahooInterval.endsWith('m');
+  const range = isIntraday ? plan.yahooRange : YAHOO_DAILY_ANALYSIS_RANGE;
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(
     symbol,
-  )}?range=${plan.yahooRange}&interval=${plan.yahooInterval}&includePrePost=false`;
+  )}?range=${range}&interval=${plan.yahooInterval}&includePrePost=false`;
 
   try {
     const res = await timedFetch(url);
@@ -97,16 +118,19 @@ async function fetchYahoo(symbol: string, timeframe: Timeframe): Promise<QuoteSe
       });
     }
     if (bars.length === 0) return null;
+    const sorted = bars.sort((a, b) => a.time - b.time);
+    const displayBars = isIntraday ? sorted : sliceTail(sorted, plan.displayCutoffDays);
 
-    const isIntraday = plan.yahooInterval.endsWith('m');
     return {
       symbol,
       resolvedSymbol: result.meta?.symbol ?? symbol,
       source: 'yahoo',
       interval: plan.yahooInterval,
-      bars,
+      bars: sorted,
+      displayBars,
       quality: (isIntraday ? 'real-intraday' : 'real-daily') as DataQuality,
       currency: result.meta?.currency,
+      crossValidated: null,
     };
   } catch {
     return null;
@@ -144,24 +168,33 @@ async function fetchStooq(symbol: string, timeframe: Timeframe): Promise<QuoteSe
   const attempts = [symbol.toLowerCase(), `${symbol.toLowerCase()}.us`];
 
   for (const attempt of attempts) {
-    const bars = await fetchStooqOnce(attempt);
-    if (!bars) continue;
-    const sorted = bars.sort((a, b) => a.time - b.time);
-    const cutoffDays = plan.stooqCutoffDays;
-    const sliced = cutoffDays
-      ? sorted.filter((b) => b.time >= sorted[sorted.length - 1]!.time - cutoffDays * 86400)
-      : sorted;
-    if (sliced.length === 0) continue;
+    const rawBars = await fetchStooqOnce(attempt);
+    if (!rawBars) continue;
+    const sorted = rawBars.sort((a, b) => a.time - b.time);
+    const bars = sliceTail(sorted, ANALYSIS_HISTORY_DAYS);
+    if (bars.length === 0) continue;
+    const displayBars = sliceTail(bars, plan.displayCutoffDays);
     return {
       symbol,
       resolvedSymbol: attempt.toUpperCase(),
       source: 'stooq',
       interval: '1d',
-      bars: sliced,
+      bars,
+      displayBars,
       quality: 'real-daily',
+      crossValidated: null,
     };
   }
   return null;
+}
+
+function crossValidate(primary: QuoteSeries, secondary: QuoteSeries | null): QuoteSeries['crossValidated'] {
+  if (!secondary) return null;
+  const p = primary.bars[primary.bars.length - 1];
+  const s = secondary.bars[secondary.bars.length - 1];
+  if (!p || !s || p.close === 0) return null;
+  const deltaPct = Math.abs((s.close - p.close) / p.close) * 100;
+  return { agrees: deltaPct <= 2, deltaPct, otherSource: secondary.source };
 }
 
 export interface QuoteFetchOutcome {
@@ -170,10 +203,18 @@ export interface QuoteFetchOutcome {
   error: string | null;
 }
 
+const cache = new Map<string, { expires: number; outcome: QuoteFetchOutcome }>();
+
+function notFoundMessage(symbol: string): string {
+  return `Couldn’t find market data for "${symbol}" from either free source. Double-check the ticker, or continue with screenshot-only analysis.`;
+}
+
 /**
- * Tries the source best suited to the requested timeframe first, then falls back to the other.
- * Intraday timeframes (1D/5D) prefer Yahoo (Stooq's free tier has no intraday); everything else
- * prefers Stooq (longer, steadier daily history with no key and generous reliability).
+ * Intraday timeframes (1D/5D) use Yahoo only, falling back to Stooq's daily bars if Yahoo is
+ * unavailable — Stooq's free tier has no intraday granularity, so there's nothing to
+ * cross-validate there. Every other timeframe fetches Stooq and Yahoo concurrently: whichever
+ * responds becomes the primary source, and if both respond their latest closes are compared as
+ * a free data-quality check (see `crossValidated` on the result).
  */
 export async function getQuoteSeries(symbolRaw: string, timeframe: Timeframe): Promise<QuoteFetchOutcome> {
   const symbol = normalizeSymbol(symbolRaw);
@@ -181,30 +222,44 @@ export async function getQuoteSeries(symbolRaw: string, timeframe: Timeframe): P
     return { series: null, attemptedSources: [], error: 'That doesn’t look like a valid ticker symbol.' };
   }
 
+  const cacheKey = `${symbol}:${timeframe}`;
+  const cached = cache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.outcome;
+
   const preferIntraday = timeframe === '1D' || timeframe === '5D';
   const attempted: string[] = [];
+  let outcome: QuoteFetchOutcome;
 
   if (preferIntraday) {
     attempted.push('yahoo');
     const yahoo = await fetchYahoo(symbol, timeframe);
-    if (yahoo) return { series: yahoo, attemptedSources: attempted, error: null };
-    attempted.push('stooq');
-    const stooq = await fetchStooq(symbol, timeframe);
-    if (stooq) return { series: stooq, attemptedSources: attempted, error: null };
+    if (yahoo) {
+      outcome = { series: yahoo, attemptedSources: attempted, error: null };
+    } else {
+      attempted.push('stooq');
+      const stooq = await fetchStooq(symbol, timeframe);
+      outcome = stooq
+        ? { series: stooq, attemptedSources: attempted, error: null }
+        : { series: null, attemptedSources: attempted, error: notFoundMessage(symbol) };
+    }
   } else {
-    attempted.push('stooq');
-    const stooq = await fetchStooq(symbol, timeframe);
-    if (stooq) return { series: stooq, attemptedSources: attempted, error: null };
-    attempted.push('yahoo');
-    const yahoo = await fetchYahoo(symbol, timeframe);
-    if (yahoo) return { series: yahoo, attemptedSources: attempted, error: null };
+    attempted.push('stooq', 'yahoo');
+    const [stooq, yahoo] = await Promise.all([fetchStooq(symbol, timeframe), fetchYahoo(symbol, timeframe)]);
+    const primary = stooq ?? yahoo;
+    if (primary) {
+      const secondary = primary === stooq ? yahoo : stooq;
+      outcome = {
+        series: { ...primary, crossValidated: crossValidate(primary, secondary) },
+        attemptedSources: attempted,
+        error: null,
+      };
+    } else {
+      outcome = { series: null, attemptedSources: attempted, error: notFoundMessage(symbol) };
+    }
   }
 
-  return {
-    series: null,
-    attemptedSources: attempted,
-    error: `Couldn’t find market data for "${symbol}" from either free source. Double-check the ticker, or continue with screenshot-only analysis.`,
-  };
+  cache.set(cacheKey, { expires: Date.now() + CACHE_TTL_MS, outcome });
+  return outcome;
 }
 
 interface YahooChartResponse {
