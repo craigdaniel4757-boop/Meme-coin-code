@@ -5,6 +5,7 @@ import IndicatorGrid from './IndicatorGrid';
 import LevelsTable from './LevelsTable';
 import PlanSteps from './PlanSteps';
 import PriceChart from './PriceChart';
+import TrackRecordPanel from './TrackRecordPanel';
 import Disclaimer from './Disclaimer';
 import type { AnalysisResult, Plan, QuoteSeries } from '@/lib/types';
 
@@ -58,7 +59,8 @@ export default function ResultsView({
         <div className="rounded-xl border border-border bg-panel p-3 shadow-panel">
           <PriceChart bars={quoteSeries.bars} levels={result.levels} />
           <p className="mt-2 px-1 text-[11px] text-muted">
-            Yellow = SMA 20 · Blue = SMA 50 · Purple = SMA 200 · dashed lines = detected support/resistance zones.
+            Yellow = SMA 20 · Blue = SMA 50 · Purple = SMA 200 · Cyan dotted = VWAP · dashed lines
+            = detected support/resistance zones.
           </p>
         </div>
       )}
@@ -110,6 +112,13 @@ export default function ResultsView({
           )}
         </div>
       </div>
+
+      {(result.relativeStrength || result.backtest) && (
+        <div className="rounded-xl border border-border bg-panel p-5 shadow-panel">
+          <h3 className="mb-3 text-sm font-semibold text-slate-100">Track record &amp; context</h3>
+          <TrackRecordPanel relativeStrength={result.relativeStrength} backtest={result.backtest} />
+        </div>
+      )}
 
       <div className="rounded-xl border border-border bg-panel p-5 shadow-panel">
         <PlanSteps plan={plan} />

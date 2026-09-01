@@ -30,6 +30,7 @@ export function generatePlan(
   steps.push(buildMomentumStep(result));
   steps.push(buildLevelsStep(result));
   steps.push(buildPatternStep(result));
+  steps.push(buildTrackRecordStep(result));
   steps.push(buildApproachStep(result, horizon));
   steps.push(buildRiskStep(result, horizon));
 
@@ -59,6 +60,19 @@ function buildContextStep(result: AnalysisResult, timeframe: Timeframe, symbol: 
   const directionWord =
     result.trend.direction === 'uptrend' ? 'an uptrend' : result.trend.direction === 'downtrend' ? 'a downtrend' : 'a sideways / range-bound structure';
   parts.push(`Overall structure reads as ${directionWord} (strength ${Math.round(result.trend.strength * 100)}%).`);
+
+  if (result.periodHighLow) {
+    const phl = result.periodHighLow;
+    if (phl.nearHigh) {
+      parts.push(`Price is within 3% of its high for this window (${formatPrice(phl.periodHigh)}).`);
+    } else if (phl.nearLow) {
+      parts.push(`Price is within 3% of its low for this window (${formatPrice(phl.periodLow)}).`);
+    } else {
+      parts.push(
+        `Price sits ${Math.abs(phl.pctFromHigh).toFixed(1)}% below its window high (${formatPrice(phl.periodHigh)}) and ${phl.pctFromLow.toFixed(1)}% above its window low (${formatPrice(phl.periodLow)}).`,
+      );
+    }
+  }
 
   return { title: 'Trend context', body: parts.join(' ') };
 }
@@ -112,12 +126,47 @@ function buildPatternStep(result: AnalysisResult): PlanStep {
   if (result.patterns.length === 0) {
     return {
       title: 'Chart patterns',
-      body: 'No high-confidence textbook pattern (double top/bottom, breakout, squeeze, divergence) is flagged right now — that’s a neutral, not a bad, signal.',
+      body: 'No high-confidence textbook pattern (double top/bottom, breakout, triangle, head & shoulders, flag, candlestick reversal, squeeze, or divergence) is flagged right now — that’s a neutral, not a bad, signal.',
     };
   }
-  const sorted = [...result.patterns].sort((a, b) => b.confidence - a.confidence).slice(0, 4);
+  const sorted = [...result.patterns].sort((a, b) => b.confidence - a.confidence).slice(0, 5);
   const body = sorted.map((p) => `${p.label}: ${p.description}`).join(' ');
   return { title: 'Chart patterns', body };
+}
+
+function buildTrackRecordStep(result: AnalysisResult): PlanStep {
+  if (result.dataQuality === 'image-only') {
+    return {
+      title: 'Track record & context',
+      body: 'Relative strength vs. the broader market and a historical signal check both need real price data — add a ticker symbol to see them.',
+    };
+  }
+  const parts: string[] = [];
+
+  if (result.relativeStrength) {
+    const rs = result.relativeStrength;
+    parts.push(
+      `Vs. ${rs.benchmarkSymbol}: this moved ${rs.symbolReturnPct >= 0 ? '+' : ''}${rs.symbolReturnPct.toFixed(1)}% over the window while ${rs.benchmarkSymbol} moved ${rs.benchmarkReturnPct >= 0 ? '+' : ''}${rs.benchmarkReturnPct.toFixed(1)}% — ${rs.outperforming ? 'outperforming' : 'underperforming'} the broader market by ${Math.abs(rs.relativeStrengthPct).toFixed(1)} points.`,
+    );
+  }
+
+  const bounce = result.backtest?.rsiOversoldBounce;
+  if (bounce && bounce.occurrences >= 3 && bounce.hitRatePct !== null && bounce.avgForwardReturnPct !== null) {
+    parts.push(
+      `Historical check on this exact chart: "${bounce.label}" fired ${bounce.occurrences} times in the visible history, and price was higher ${bounce.horizon} bars later ${bounce.hitRatePct.toFixed(0)}% of the time (average ${bounce.avgForwardReturnPct >= 0 ? '+' : ''}${bounce.avgForwardReturnPct.toFixed(1)}%). Small sample — a pattern, not a promise.`,
+    );
+  }
+  const fade = result.backtest?.rsiOverboughtFade;
+  if (fade && fade.occurrences >= 3 && fade.hitRatePct !== null && fade.avgForwardReturnPct !== null) {
+    parts.push(
+      `Historical check: "${fade.label}" fired ${fade.occurrences} times in the visible history, and price was lower ${fade.horizon} bars later ${fade.hitRatePct.toFixed(0)}% of the time (average ${fade.avgForwardReturnPct >= 0 ? '+' : ''}${fade.avgForwardReturnPct.toFixed(1)}% in the fade's favor). Small sample — a pattern, not a promise.`,
+    );
+  }
+
+  if (parts.length === 0) {
+    parts.push('Not enough historical occurrences on this timeframe, or no benchmark data, to add track-record context beyond what’s above.');
+  }
+  return { title: 'Track record & context', body: parts.join(' ') };
 }
 
 function buildApproachStep(result: AnalysisResult, horizon: Horizon): PlanStep {
@@ -146,6 +195,7 @@ function buildApproachStep(result: AnalysisResult, horizon: Horizon): PlanStep {
       );
       if (stop) parts.push(`A tight, volatility-based stop (${stopMult}× ATR) would sit near ${formatPrice(stop)}.`);
       if (nearestResistance) parts.push(`First target: the ${formatPrice(nearestResistance.price)} zone, reassessing if it holds.`);
+      if (ind.vwap) parts.push(`Price is currently ${lastClose >= ind.vwap ? 'above' : 'below'} VWAP (~${formatPrice(ind.vwap)}) — many short-term traders treat that as a live bias filter, favoring longs above it and shorts below it.`);
     } else if (bias === 'bearish') {
       const stop = atrVal ? lastClose + atrVal * stopMult : nearestResistance?.price;
       parts.push(
@@ -153,6 +203,7 @@ function buildApproachStep(result: AnalysisResult, horizon: Horizon): PlanStep {
       );
       if (stop) parts.push(`A tight, volatility-based stop (${stopMult}× ATR) on a short would sit near ${formatPrice(stop)}.`);
       if (nearestSupport) parts.push(`First downside target: the ${formatPrice(nearestSupport.price)} zone.`);
+      if (ind.vwap) parts.push(`Price is currently ${lastClose >= ind.vwap ? 'above' : 'below'} VWAP (~${formatPrice(ind.vwap)}) — many short-term traders treat that as a live bias filter, favoring longs above it and shorts below it.`);
     } else {
       parts.push(
         `Signals are mixed — trend, momentum, and pattern evidence don’t agree enough for a clean short-term setup. The higher-discipline move is usually to wait for either a confirmed break of ${nearestResistance ? formatPrice(nearestResistance.price) : 'resistance'} or ${nearestSupport ? formatPrice(nearestSupport.price) : 'support'} before committing capital.`,

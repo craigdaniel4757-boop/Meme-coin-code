@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { sma } from '@/lib/indicators';
+import { anchoredVwap, sma } from '@/lib/indicators';
 import type { Bar, Level } from '@/lib/types';
 
 export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Level[] }) {
@@ -70,6 +70,22 @@ export default function PriceChart({ bars, levels }: { bars: Bar[]; levels: Leve
             ),
         );
       }
+
+      const vwapValues = anchoredVwap(bars, 0);
+      const vwapSeries = chart.addLineSeries({
+        color: '#22d3ee',
+        lineWidth: 1,
+        lineStyle: LineStyle.Dotted,
+        priceLineVisible: false,
+        lastValueVisible: false,
+      });
+      vwapSeries.setData(
+        bars
+          .map((b, i) => ({ time: b.time as import('lightweight-charts').UTCTimestamp, value: vwapValues[i] ?? null }))
+          .filter(
+            (p): p is { time: import('lightweight-charts').UTCTimestamp; value: number } => p.value !== null,
+          ),
+      );
 
       for (const level of levels.slice(0, 6)) {
         candleSeries.createPriceLine({

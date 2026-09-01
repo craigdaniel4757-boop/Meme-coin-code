@@ -12,8 +12,22 @@ import Disclaimer from '@/components/Disclaimer';
 import { extractChartText } from '@/lib/ocr';
 import { analyzeChartImage } from '@/lib/imageAnalysis';
 import { analyzeSeries, analyzeImageOnly } from '@/lib/scorer';
+import { computeRelativeStrength } from '@/lib/relativeStrength';
 import { generatePlan } from '@/lib/planner';
-import type { AnalysisResult, Horizon, Plan, QuoteSeries, Timeframe } from '@/lib/types';
+import type { AnalysisResult, Horizon, Plan, QuoteSeries, RelativeStrengthReading, Timeframe } from '@/lib/types';
+
+const BENCHMARK_SYMBOL = 'SPY';
+
+async function fetchQuote(symbol: string, timeframe: Timeframe): Promise<{ series: QuoteSeries | null; error: string | null }> {
+  try {
+    const res = await fetch(`/api/quote?symbol=${encodeURIComponent(symbol)}&timeframe=${timeframe}`);
+    const json = await res.json();
+    if (res.ok && json.series) return { series: json.series as QuoteSeries, error: null };
+    return { series: null, error: typeof json.error === 'string' ? json.error : null };
+  } catch {
+    return { series: null, error: null };
+  }
+}
 
 const STAGES = [
   'Reading your screenshot…',
@@ -106,24 +120,29 @@ export default function Home() {
       const trimmedTicker = ticker.trim().toUpperCase();
 
       if (trimmedTicker) {
-        try {
-          const res = await fetch(`/api/quote?symbol=${encodeURIComponent(trimmedTicker)}&timeframe=${timeframe}`);
-          const json = await res.json();
-          if (res.ok && json.series) {
-            series = json.series as QuoteSeries;
-          } else {
-            setFetchNote(json.error ?? `Couldn't find free market data for "${trimmedTicker}" — showing a screenshot-only estimate instead.`);
-          }
-        } catch {
-          setFetchNote(`Network error while fetching data for "${trimmedTicker}" — showing a screenshot-only estimate instead.`);
+        const primary = await fetchQuote(trimmedTicker, timeframe);
+        if (primary.series) {
+          series = primary.series;
+        } else {
+          setFetchNote(primary.error ?? `Couldn't find free market data for "${trimmedTicker}" — showing a screenshot-only estimate instead.`);
         }
       }
 
-      const imageHeuristics = await analyzeChartImage(file).catch(() => null);
+      const [imageHeuristics, benchmarkOutcome] = await Promise.all([
+        analyzeChartImage(file).catch(() => null),
+        series && trimmedTicker !== BENCHMARK_SYMBOL
+          ? fetchQuote(BENCHMARK_SYMBOL, timeframe)
+          : Promise.resolve({ series: null, error: null }),
+      ]);
+
+      let relativeStrength: RelativeStrengthReading | null = null;
+      if (series && benchmarkOutcome.series) {
+        relativeStrength = computeRelativeStrength(series.bars, benchmarkOutcome.series.bars, BENCHMARK_SYMBOL);
+      }
 
       let finalResult: AnalysisResult;
       if (series) {
-        const base = analyzeSeries(series.bars, series.quality);
+        const base = analyzeSeries(series.bars, series.quality, relativeStrength);
         finalResult = imageHeuristics ? { ...base, imageOnly: imageHeuristics } : base;
       } else if (imageHeuristics) {
         finalResult = analyzeImageOnly(imageHeuristics);
@@ -159,10 +178,12 @@ export default function Home() {
           </h1>
           <p className="mt-3 max-w-2xl text-sm leading-relaxed text-muted sm:text-base">
             Upload a screenshot of any 1D–1Y stock chart. ChartPilot reads the ticker off the
-            image, pulls real free price history, runs a full technical-analysis pass (trend,
-            momentum, support/resistance, chart patterns), and turns it into a step-by-step plan
-            tuned to a short-term or long-term goal — with every number traceable back to real
-            data, not a black box.
+            image, pulls real free price history, and runs a full technical-analysis pass —
+            trend strength (ADX), momentum (RSI/Stochastic/MACD/OBV), support/resistance,
+            candlestick and chart-shape patterns, relative strength vs. the market, and a
+            historical signal check — then turns it into a step-by-step plan tuned to a
+            short-term or long-term goal, with every number traceable back to real data, not a
+            black box.
           </p>
           <div className="mt-5 max-w-2xl">
             <Disclaimer compact />

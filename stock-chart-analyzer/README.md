@@ -13,18 +13,26 @@ only — no paid APIs, no API keys required.
    ticker symbol, and a canvas-based heuristic estimates the visual trend as a fallback signal.
 2. **Fetches real, free price history** for the resolved ticker from Stooq and Yahoo Finance's
    public endpoints (server-side, no key) — daily bars for 1M–1Y, true intraday bars for 1D/5D.
-3. **Runs a full technical-analysis pass** on the real data: SMA/EMA stack, RSI(14), MACD,
-   Bollinger Bands, ATR, fractal swing-point support/resistance clustering, double top/bottom,
-   breakout detection, Bollinger squeeze, RSI divergence, and Fibonacci retracement.
-4. **Scores it** into a −100…+100 directional read with a confidence number that's deliberately
-   capped (never 100%, and much lower when only the screenshot could be used) — see
-   `lib/scorer.ts`.
-5. **Generates a step-by-step plan** — trend context, momentum, key levels, pattern signals, a
-   suggested approach (tuned to short-term vs. long-term), risk-management notes, and an
-   explicit invalidation condition — see `lib/planner.ts`.
-6. **Re-renders the real price data** as an interactive candlestick chart (`lightweight-charts`)
-   with moving-average and support/resistance overlays, so you can cross-check it against your
-   screenshot.
+3. **Runs a full technical-analysis pass** on the real data: SMA/EMA stack, RSI(14),
+   Stochastic %K/%D, MACD, ADX/DMI (trend strength/conviction), On-Balance Volume + divergence,
+   anchored VWAP, ATR, Bollinger Bands, fractal swing-point support/resistance clustering,
+   period high/low context, Fibonacci retracement, and pattern detection covering double
+   top/bottom, breakouts, triangles, head & shoulders, flags/pennants, Bollinger squeezes,
+   RSI/MACD/OBV divergence, and candlestick reversal patterns (engulfing, hammer, shooting
+   star, doji, morning/evening star) on the real OHLC bars.
+4. **Checks itself against the market and its own history** — relative strength vs. a
+   benchmark (SPY), and a small, honest backtest that replays an RSI mean-reversion signal over
+   the fetched chart's own bars (no look-ahead bias) and reports its actual historical hit rate
+   — real empirical context, not just formula-trust.
+5. **Scores it** into a −100…+100 directional read with a confidence number that's deliberately
+   capped (never 100%, and much lower when only the screenshot could be used) and adjusted by
+   ADX-measured trend conviction — see `lib/scorer.ts`.
+6. **Generates a step-by-step plan** — trend context, momentum, key levels, pattern signals,
+   track record & context, a suggested approach (tuned to short-term vs. long-term),
+   risk-management notes, and an explicit invalidation condition — see `lib/planner.ts`.
+7. **Re-renders the real price data** as an interactive candlestick chart (`lightweight-charts`)
+   with moving-average, VWAP, and support/resistance overlays, so you can cross-check it against
+   your screenshot.
 
 If no ticker can be resolved (OCR fails and none is typed in), the tool still produces a read
 from the screenshot's pixels alone — clearly labeled and confidence-capped well below the
@@ -62,13 +70,21 @@ app/
   methodology/page.tsx   Transparency page: data sources, formulas, confidence, limitations
   api/quote/route.ts     Server-side free market-data proxy (Stooq + Yahoo, no CORS/keys client-side)
 components/              UI: dropzone, controls, results view, indicator grid, levels table,
-                          plan steps, lightweight-charts price chart, disclaimers
+                          track-record panel, plan steps, lightweight-charts price chart,
+                          disclaimers
 lib/
   types.ts               Shared domain types
-  indicators.ts          SMA, EMA, RSI (Wilder), MACD, Bollinger Bands, ATR (Wilder)
+  indicators.ts          SMA, EMA, RSI/ATR/ADX (Wilder), MACD, Bollinger Bands, Stochastic,
+                          OBV, anchored VWAP
   swings.ts               Fractal swing-point detection + support/resistance clustering
-  patterns.ts             Trend classification, double top/bottom, breakouts, squeeze,
-                          RSI divergence, Fibonacci retracement
+  patterns.ts             Trend classification (ADX-weighted), double top/bottom, breakouts,
+                          triangles, head & shoulders, flags, squeeze, RSI/MACD/OBV divergence,
+                          Fibonacci retracement, period high/low context
+  candlePatterns.ts        Candlestick reversal patterns on real OHLC bars (engulfing, hammer,
+                          shooting star, doji, morning/evening star)
+  relativeStrength.ts      Return vs. a benchmark (SPY) over the same window
+  backtest.ts               No-look-ahead historical replay of an RSI mean-reversion signal
+                          over the fetched chart's own bars
   scorer.ts                Combines everything into a signal + honestly-capped confidence
   dataSources.ts           Stooq/Yahoo fetchers, symbol validation, normalization (server-only)
   ocr.ts                   Tesseract.js ticker/price extraction (client-only)

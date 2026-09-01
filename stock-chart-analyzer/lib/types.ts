@@ -50,15 +50,24 @@ export interface TrendReading {
   strength: number; // 0-1
   smaStack: 'bullish' | 'bearish' | 'mixed';
   structure: 'higher-highs-lows' | 'lower-highs-lows' | 'mixed';
+  adx: number | null;
+  adxState: 'trending' | 'choppy' | 'unknown';
   notes: string[];
 }
+
+export type DivergenceState = 'bullish' | 'bearish' | 'none';
 
 export interface MomentumReading {
   rsi: number | null;
   rsiState: 'overbought' | 'oversold' | 'neutral' | 'unknown';
   macdHistogram: number | null;
   macdCross: 'bullish-cross' | 'bearish-cross' | 'none' | 'unknown';
-  rsiDivergence: 'bullish' | 'bearish' | 'none';
+  rsiDivergence: DivergenceState;
+  macdDivergence: DivergenceState;
+  obvDivergence: DivergenceState;
+  stochK: number | null;
+  stochState: 'overbought' | 'oversold' | 'neutral' | 'unknown';
+  obvTrend: 'rising' | 'falling' | 'flat' | 'unknown';
   notes: string[];
 }
 
@@ -96,6 +105,39 @@ export interface IndicatorSnapshot {
   macd: { macd: number; signal: number; histogram: number } | null;
   bollinger: { upper: number; middle: number; lower: number } | null;
   atr14: number | null;
+  dmi: { adx: number; plusDI: number; minusDI: number } | null;
+  stochastic: { k: number; d: number } | null;
+  vwap: number | null;
+}
+
+export interface PeriodHighLow {
+  periodHigh: number;
+  periodLow: number;
+  pctFromHigh: number;
+  pctFromLow: number;
+  nearHigh: boolean;
+  nearLow: boolean;
+}
+
+export interface RelativeStrengthReading {
+  benchmarkSymbol: string;
+  symbolReturnPct: number;
+  benchmarkReturnPct: number;
+  relativeStrengthPct: number;
+  outperforming: boolean;
+}
+
+export interface BacktestSignalStat {
+  label: string;
+  occurrences: number;
+  hitRatePct: number | null;
+  avgForwardReturnPct: number | null;
+  horizon: number;
+}
+
+export interface BacktestReading {
+  rsiOversoldBounce: BacktestSignalStat;
+  rsiOverboughtFade: BacktestSignalStat;
 }
 
 export interface AnalysisResult {
@@ -111,6 +153,9 @@ export interface AnalysisResult {
   fib: FibLevel[] | null;
   patterns: PatternFlag[];
   indicators: IndicatorSnapshot | null;
+  periodHighLow: PeriodHighLow | null;
+  relativeStrength: RelativeStrengthReading | null;
+  backtest: BacktestReading | null;
   imageOnly?: ImageHeuristics | null;
 }
 

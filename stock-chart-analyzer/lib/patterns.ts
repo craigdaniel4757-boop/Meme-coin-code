@@ -10,6 +10,7 @@ import type {
   Level,
   MomentumReading,
   PatternFlag,
+  PeriodHighLow,
   SwingPoint,
   TrendDirection,
   TrendReading,
@@ -21,6 +22,7 @@ export function classifyTrend(
   sma50: (number | null)[],
   sma200: (number | null)[],
   swings: SwingPoint[],
+  adxData: { adx: number | null; plusDI: number | null; minusDI: number | null } | null = null,
 ): TrendReading {
   const notes: string[] = [];
   const lastClose = bars[bars.length - 1]!.close;
@@ -80,7 +82,25 @@ export function classifyTrend(
     strength = 0.5;
   }
 
-  return { direction, strength, smaStack, structure, notes };
+  const adxVal = adxData?.adx ?? null;
+  const adxState: TrendReading['adxState'] = adxVal === null ? 'unknown' : adxVal >= 25 ? 'trending' : 'choppy';
+  if (adxVal !== null) {
+    const diAgrees =
+      direction === 'uptrend'
+        ? (adxData?.plusDI ?? 0) > (adxData?.minusDI ?? 0)
+        : direction === 'downtrend'
+          ? (adxData?.minusDI ?? 0) > (adxData?.plusDI ?? 0)
+          : false;
+    if (adxState === 'trending' && diAgrees) {
+      strength = Math.min(1, strength + 0.1);
+      notes.push(`ADX(14) is ${adxVal.toFixed(1)} and directional movement agrees — this reads as a genuinely trending market, not just noise.`);
+    } else if (adxState === 'choppy') {
+      strength = Math.max(0.15, strength - 0.15);
+      notes.push(`ADX(14) is ${adxVal.toFixed(1)}, below the conventional 25 trending threshold — momentum behind this trend read is weak.`);
+    }
+  }
+
+  return { direction, strength, smaStack, structure, adx: adxVal, adxState, notes };
 }
 
 function isMonotonic(values: number[], dir: 'up' | 'down'): boolean {
@@ -92,12 +112,18 @@ function isMonotonic(values: number[], dir: 'up' | 'down'): boolean {
   return true;
 }
 
+/**
+ * Double top / double bottom, reporting only the single most recent qualifying pair for each
+ * (not every overlapping pair in the lookback window) — a tight consolidation can easily have
+ * several swing highs within tolerance of each other, and flagging each pair separately would
+ * just be the same observation repeated, not several distinct signals.
+ */
 export function detectDoubleTopBottom(swings: SwingPoint[], tolerancePct = 0.02): PatternFlag[] {
   const flags: PatternFlag[] = [];
   const highs = swings.filter((s) => s.kind === 'high').slice(-6);
   const lows = swings.filter((s) => s.kind === 'low').slice(-6);
 
-  for (let i = 1; i < highs.length; i++) {
+  for (let i = highs.length - 1; i >= 1; i--) {
     const a = highs[i - 1]!;
     const b = highs[i]!;
     if (Math.abs(a.price - b.price) / a.price <= tolerancePct) {
@@ -110,9 +136,10 @@ export function detectDoubleTopBottom(swings: SwingPoint[], tolerancePct = 0.02)
           b.price,
         )} within ${(tolerancePct * 100).toFixed(1)}% of each other — a classic reversal warning if the level between them breaks down.`,
       });
+      break;
     }
   }
-  for (let i = 1; i < lows.length; i++) {
+  for (let i = lows.length - 1; i >= 1; i--) {
     const a = lows[i - 1]!;
     const b = lows[i]!;
     if (Math.abs(a.price - b.price) / a.price <= tolerancePct) {
@@ -125,6 +152,7 @@ export function detectDoubleTopBottom(swings: SwingPoint[], tolerancePct = 0.02)
           b.price,
         )} within ${(tolerancePct * 100).toFixed(1)}% of each other — a classic reversal setup if the level between them breaks up.`,
       });
+      break;
     }
   }
   return flags;
@@ -204,32 +232,192 @@ export function volatilityReading(
   return { atr: atrVal, atrPct, bollingerWidthPct: currentWidth, squeeze, notes };
 }
 
-export function rsiDivergence(
-  closes: number[],
-  rsiValues: (number | null)[],
-  swings: SwingPoint[],
-): MomentumReading['rsiDivergence'] {
+type DivergenceResult = 'bullish' | 'bearish' | 'none';
+
+/**
+ * Generic price/oscillator divergence check shared by RSI, MACD, and OBV: a swing that price
+ * confirms (a fresh high or low) but the indicator doesn't confirm is a classic early tell
+ * that the move's momentum is weaker than the price action alone suggests.
+ */
+function detectDivergence(values: (number | null | undefined)[], swings: SwingPoint[]): DivergenceResult {
   const highs = swings.filter((s) => s.kind === 'high').slice(-2);
   const lows = swings.filter((s) => s.kind === 'low').slice(-2);
 
   if (highs.length === 2) {
     const [a, b] = highs;
-    const rsiA = rsiValues[a!.index];
-    const rsiB = rsiValues[b!.index];
-    if (rsiA !== null && rsiA !== undefined && rsiB !== null && rsiB !== undefined) {
-      if (b!.price > a!.price && rsiB < rsiA) return 'bearish';
+    const vA = values[a!.index];
+    const vB = values[b!.index];
+    if (vA !== null && vA !== undefined && vB !== null && vB !== undefined) {
+      if (b!.price > a!.price && vB < vA) return 'bearish';
     }
   }
   if (lows.length === 2) {
     const [a, b] = lows;
-    const rsiA = rsiValues[a!.index];
-    const rsiB = rsiValues[b!.index];
-    if (rsiA !== null && rsiA !== undefined && rsiB !== null && rsiB !== undefined) {
-      if (b!.price < a!.price && rsiB > rsiA) return 'bullish';
+    const vA = values[a!.index];
+    const vB = values[b!.index];
+    if (vA !== null && vA !== undefined && vB !== null && vB !== undefined) {
+      if (b!.price < a!.price && vB > vA) return 'bullish';
     }
   }
-  void closes;
   return 'none';
+}
+
+export function rsiDivergence(rsiValues: (number | null)[], swings: SwingPoint[]): MomentumReading['rsiDivergence'] {
+  return detectDivergence(rsiValues, swings);
+}
+
+/** Same idea as rsiDivergence but off the raw MACD line — a second, independent confirmation. */
+export function macdDivergence(macdLine: (number | null)[], swings: SwingPoint[]): DivergenceResult {
+  return detectDivergence(macdLine, swings);
+}
+
+/** Same idea again but off On-Balance Volume — catches moves where volume isn't confirming price. */
+export function obvDivergence(obvValues: number[], swings: SwingPoint[]): DivergenceResult {
+  return detectDivergence(obvValues, swings);
+}
+
+function linRegSlope(points: { x: number; y: number }[]): number {
+  const n = points.length;
+  if (n < 2) return 0;
+  const meanX = points.reduce((s, p) => s + p.x, 0) / n;
+  const meanY = points.reduce((s, p) => s + p.y, 0) / n;
+  let num = 0;
+  let denom = 0;
+  for (const p of points) {
+    num += (p.x - meanX) * (p.y - meanY);
+    denom += (p.x - meanX) ** 2;
+  }
+  return denom === 0 ? 0 : num / denom;
+}
+
+/** Ascending/descending/symmetrical triangle via linear-regression slope of recent swing highs vs lows. */
+export function detectTriangle(swings: SwingPoint[], lastClose: number): PatternFlag[] {
+  const flags: PatternFlag[] = [];
+  const highs = swings.filter((s) => s.kind === 'high').slice(-5);
+  const lows = swings.filter((s) => s.kind === 'low').slice(-5);
+  if (highs.length < 3 || lows.length < 3 || lastClose <= 0) return flags;
+
+  const highSlope = linRegSlope(highs.map((s) => ({ x: s.index, y: s.price })));
+  const lowSlope = linRegSlope(lows.map((s) => ({ x: s.index, y: s.price })));
+  const flatThresh = lastClose * 0.0015;
+
+  const highFlat = Math.abs(highSlope) < flatThresh;
+  const lowFlat = Math.abs(lowSlope) < flatThresh;
+  const highFalling = highSlope < -flatThresh;
+  const lowRising = lowSlope > flatThresh;
+
+  if (highFlat && lowRising) {
+    flags.push({
+      id: 'ascending-triangle',
+      label: 'Ascending triangle',
+      bias: 'bullish',
+      confidence: 0.5,
+      description: 'Swing highs are flattening out while swing lows keep rising — a compressing range that often resolves with an upside breakout.',
+    });
+  } else if (highFalling && lowFlat) {
+    flags.push({
+      id: 'descending-triangle',
+      label: 'Descending triangle',
+      bias: 'bearish',
+      confidence: 0.5,
+      description: 'Swing lows are flattening out while swing highs keep falling — a compressing range that often resolves with a downside breakdown.',
+    });
+  } else if (highFalling && lowRising) {
+    flags.push({
+      id: 'symmetrical-triangle',
+      label: 'Symmetrical triangle',
+      bias: 'neutral',
+      confidence: 0.4,
+      description: 'Swing highs and lows are converging toward each other — a compressing range with an unconfirmed breakout direction; watch which side it breaks.',
+    });
+  }
+  return flags;
+}
+
+/** Head & shoulders (and inverse) from the three most recent swing highs / lows. */
+export function detectHeadAndShoulders(swings: SwingPoint[]): PatternFlag[] {
+  const flags: PatternFlag[] = [];
+
+  const highs = swings.filter((s) => s.kind === 'high').slice(-3);
+  if (highs.length === 3) {
+    const [left, head, right] = highs as [SwingPoint, SwingPoint, SwingPoint];
+    const shoulderAvg = (left.price + right.price) / 2;
+    const shoulderDiff = shoulderAvg > 0 ? Math.abs(left.price - right.price) / shoulderAvg : 1;
+    if (head.price > left.price && head.price > right.price && shoulderDiff < 0.04) {
+      flags.push({
+        id: 'head-and-shoulders',
+        label: 'Possible head & shoulders',
+        bias: 'bearish',
+        confidence: 0.45,
+        description: `Three swing highs with the middle one clearly the tallest and the two shoulders within ${(shoulderDiff * 100).toFixed(1)}% of each other — a classic topping pattern if the neckline (the swing lows between them) breaks.`,
+      });
+    }
+  }
+
+  const lows = swings.filter((s) => s.kind === 'low').slice(-3);
+  if (lows.length === 3) {
+    const [left, head, right] = lows as [SwingPoint, SwingPoint, SwingPoint];
+    const shoulderAvg = (left.price + right.price) / 2;
+    const shoulderDiff = shoulderAvg > 0 ? Math.abs(left.price - right.price) / shoulderAvg : 1;
+    if (head.price < left.price && head.price < right.price && shoulderDiff < 0.04) {
+      flags.push({
+        id: 'inverse-head-and-shoulders',
+        label: 'Possible inverse head & shoulders',
+        bias: 'bullish',
+        confidence: 0.45,
+        description: `Three swing lows with the middle one clearly the deepest and the two shoulders within ${(shoulderDiff * 100).toFixed(1)}% of each other — a classic bottoming pattern if the neckline (the swing highs between them) breaks.`,
+      });
+    }
+  }
+  return flags;
+}
+
+/** Bull/bear flag: a sharp directional "pole" followed by a tight sideways consolidation. */
+export function detectFlag(bars: Bar[]): PatternFlag[] {
+  const flags: PatternFlag[] = [];
+  const n = bars.length;
+  const poleWindow = 10;
+  const flagWindow = 6;
+  if (n < poleWindow + flagWindow + 2) return flags;
+
+  const poleStart = bars[n - poleWindow - flagWindow]!.close;
+  const poleEnd = bars[n - flagWindow]!.close;
+  if (poleStart <= 0) return flags;
+  const poleChangePct = (poleEnd - poleStart) / poleStart;
+
+  const flagCloses = bars.slice(n - flagWindow).map((b) => b.close);
+  const flagHigh = Math.max(...flagCloses);
+  const flagLow = Math.min(...flagCloses);
+  const flagRangePct = poleEnd > 0 ? (flagHigh - flagLow) / poleEnd : 1;
+
+  if (Math.abs(poleChangePct) >= 0.06 && flagRangePct <= Math.abs(poleChangePct) * 0.45) {
+    const bullish = poleChangePct > 0;
+    flags.push({
+      id: bullish ? 'bull-flag' : 'bear-flag',
+      label: bullish ? 'Bull flag' : 'Bear flag',
+      bias: bullish ? 'bullish' : 'bearish',
+      confidence: 0.45,
+      description: `A sharp ${bullish ? 'advance' : 'decline'} (${(poleChangePct * 100).toFixed(1)}%) followed by a tight sideways consolidation — a classic continuation setup if price breaks ${bullish ? 'up' : 'down'} out of the range.`,
+    });
+  }
+  return flags;
+}
+
+/** Where the latest close sits relative to the high/low of the entire fetched window. */
+export function periodHighLowContext(bars: Bar[]): PeriodHighLow {
+  const periodHigh = Math.max(...bars.map((b) => b.high));
+  const periodLow = Math.min(...bars.map((b) => b.low));
+  const lastClose = bars[bars.length - 1]!.close;
+  const pctFromHigh = periodHigh > 0 ? ((lastClose - periodHigh) / periodHigh) * 100 : 0;
+  const pctFromLow = periodLow > 0 ? ((lastClose - periodLow) / periodLow) * 100 : 0;
+  return {
+    periodHigh,
+    periodLow,
+    pctFromHigh,
+    pctFromLow,
+    nearHigh: pctFromHigh >= -3,
+    nearLow: pctFromLow <= 3,
+  };
 }
 
 export function fibonacciLevels(swings: SwingPoint[]): FibLevel[] | null {
