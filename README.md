@@ -152,7 +152,8 @@ installing a web framework.
 ## SOL Paper Desk (browser simulator)
 
 [`sol-sim/`](sol-sim/) is a standalone static website that paper-trades live
-Solana memecoins with a fake $1,000 portfolio. It shows live P/L, BUY / HOLD / SELL
+Solana memecoins with a fake $1,000 portfolio, pricing every order with a real
+Jupiter swap quote. It shows live P/L, BUY / HOLD / SELL
 signals and four rule-based momentum strategies, with no install and no backend.
 Open `sol-sim/index.html` or serve the folder. See [sol-sim/README.md](sol-sim/README.md).
 

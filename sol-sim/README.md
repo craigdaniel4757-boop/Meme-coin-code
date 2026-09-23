@@ -1,12 +1,13 @@
 # SOL Paper Desk: live Solana memecoin trading simulator
 
-A static website that paper-trades **real Solana memecoins at live prices** with a
-**fake $1,000 portfolio**. It scans trending Solana tokens on DexScreener every
-few seconds and scores each one BUY / HOLD / SELL / AVOID. With auto-trade on, it
-opens and closes simulated positions by rule. Portfolio value and P/L update live
-on every price tick.
+A static website that paper-trades **real Solana memecoins with real live data**
+using a **fake $1,000 portfolio**. It scans trending Solana tokens on DexScreener
+every few seconds and scores each one BUY / HOLD / SELL / AVOID. With auto-trade
+on, it opens and closes positions by rule, and **every order is priced with a
+real Jupiter swap quote**: the exact amount a real swap would get at that moment.
+Portfolio value and P/L update live on every price tick.
 
-No wallet, no keys, and no real orders. Nothing is ever sent on-chain.
+No wallet and no signing. No transaction is ever sent on-chain.
 
 ## Run it
 
@@ -27,6 +28,41 @@ static host.
   top-bar dropdown. The live and demo portfolios are kept separately.
 - State (cash, positions, trade log, equity curve, settings) is saved in
   `localStorage`. **Reset to $1,000** starts over.
+
+## Order fills: real Jupiter quotes
+
+To test whether the strategies work on real coins, each simulated order is
+priced the way a real one would be:
+
+1. **Buy:** the simulator asks Jupiter, Solana's swap aggregator, for a
+   USDC → token quote for the exact dollar amount. The quote's output (after
+   pool fees, price impact and multi-hop routing) is the number of tokens you
+   get. The route (e.g. `Raydium → Meteora DLMM`) is shown in the trade log.
+2. **Sell-back check:** before committing, it quotes selling those tokens
+   straight back to USDC.
+   - **No sell route** means a honeypot or untradable token. The buy is
+     rejected, logged as `REJECTED`, and the coin shows AVOID for 10 minutes.
+   - **Round-trip cost above your limit** (default 15%) means the pool is too
+     illiquid, so the buy is also rejected.
+3. **Sell:** each exit (stop, take-profit, trailing stop, manual) is a
+   token → USDC quote for the exact on-chain amount you hold.
+
+The trade log marks each fill **JUP** (real quote) or **EST** (estimated). It also
+shows the fill's cost against the screen price ("vs screen"). The KPI row shows
+total trading costs (fees plus slippage) and how many fills were priced by Jupiter.
+
+**Jupiter API key:** Jupiter retired its keyless endpoint (`lite-api.jup.ag`) in
+2026. Get a free key at [portal.jup.ag](https://portal.jup.ag) and paste it into
+the **Order fills** panel. It's stored only in your browser's localStorage and sent
+only to `api.jup.ag` (in the `x-api-key` header). The simulator tries
+`/swap/v1/quote`, then `/swap/v2/order`. Without a working key (or if Jupiter is
+unreachable), fills fall back to the estimate model and are labeled **EST** with
+the reason, so you always know which results used real quotes. Quotes are spaced
+at least 1.1s apart to stay within free-tier rate limits.
+
+**What quotes still don't capture:** the delay between quote and landing,
+MEV/sandwich attacks, failed transactions and priority-fee spikes. Real results
+will usually be somewhat worse than quoted ones.
 
 ## Data
 
@@ -63,10 +99,11 @@ Rules every strategy follows:
 **Signals:** BUY means every entry rule of an enabled strategy passes. SELL means an exit
 rule fired on a position you hold, or sellers are in control (momentum score ≤ −35).
 HOLD means no trigger yet; the reason column shows which rules are still missing.
-AVOID means the coin fails the safety filter.
+AVOID means the coin fails the safety filter, or Jupiter just rejected an order for it.
 
-**Fill model:** 1% slippage on every fill, a 0.25% DEX fee and a $0.01 network fee per trade.
-Positions are marked to the latest price each tick.
+**Fills:** real Jupiter quotes in live mode (see above). The estimate model
+(demo mode or fallback) uses 1% slippage and a 0.25% DEX fee. Every trade also pays
+a $0.01 network fee. Open positions are marked to the latest DexScreener price each tick.
 
 ## Files
 
@@ -76,7 +113,8 @@ styles.css        dark trading-desk theme, responsive down to phone width
 js/util.js        formatting and localStorage helpers
 js/market.js      live DexScreener feed and synthetic demo feed (same interface)
 js/strategies.js  safety filter, entry/exit rules, signal scoring
-js/portfolio.js   paper portfolio: fills, P/L, stats, persistence
+js/execution.js   order fills: Jupiter quotes, honeypot/round-trip checks, estimate fallback
+js/portfolio.js   paper portfolio: books fills, P/L, stats, persistence
 js/chart.js       canvas equity curve and sparklines
 js/ui.js          rendering
 js/app.js         poll → evaluate → auto-trade → render loop, controls
@@ -84,6 +122,6 @@ js/app.js         poll → evaluate → auto-trade → render loop, controls
 
 ## Disclaimer
 
-This is an educational simulation, not financial advice. Simulated fills are
-optimistic compared with real memecoin execution (MEV, failed transactions,
-honeypots). Past simulated results don't predict real returns.
+This is an educational simulation, not financial advice. Even quote-priced fills
+are somewhat optimistic compared with real memecoin execution (landing delay, MEV,
+failed transactions). Past simulated results don't predict real returns.

@@ -1,16 +1,11 @@
-// Paper portfolio: fake cash, simulated fills with realistic memecoin costs
-// (slippage + DEX fee + network fee), realized/unrealized P/L, per-strategy
+// Paper portfolio: fake cash, positions, realized/unrealized P/L, per-strategy
 // stats, trade log and equity history. Persisted to localStorage per feed.
+// Fills (price, quantity, fees) come from SIM.execution; this only books them.
 (function () {
   const SIM = window.SIM;
   const { store } = SIM.util;
 
   const START_CASH = 1000;
-  const COSTS = {
-    slippage: 0.01, // 1% price impact on each fill
-    dexFee: 0.0025, // 0.25% pool fee
-    networkFee: 0.01, // $ per transaction (priority fee + base fee)
-  };
   const MAX_TRADES = 300;
   const MAX_EQUITY_POINTS = 2000;
 
@@ -25,6 +20,7 @@
       realized: 0,
       stratRealized: {}, // strategy id -> realized P/L
       fees: 0,
+      execCost: 0, // total paid vs the screen price: fees + slippage + price impact
       equityHist: [{ t: Date.now(), v: START_CASH }],
       cooldown: {}, // addr -> timestamp until which we won't re-enter
     };
@@ -34,32 +30,48 @@
     let s = store.get(key, null);
     if (!s || typeof s.cash !== 'number') s = fresh();
     s.stratRealized = s.stratRealized || {};
+    s.execCost = s.execCost || 0;
 
     const save = () => store.set(key, s);
 
-    function log(side, pos, qty, price, usd, reason, pnl) {
-      s.trades.unshift({ t: Date.now(), side, symbol: pos.symbol, addr: pos.addr, strategy: pos.strategy, qty, price, usd, reason, pnl });
+    function log(side, pos, qty, price, usd, reason, pnl, fill) {
+      s.trades.unshift({
+        t: Date.now(),
+        side,
+        symbol: pos.symbol,
+        addr: pos.addr,
+        strategy: pos.strategy,
+        qty,
+        price,
+        usd,
+        reason,
+        pnl,
+        src: fill ? fill.source : null,
+        vsScreen: fill ? fill.vsScreen : NaN,
+        route: (fill && fill.route) || '',
+        roundTrip: fill ? fill.roundTrip : NaN,
+        note: (fill && fill.note) || '',
+      });
       if (s.trades.length > MAX_TRADES) s.trades.length = MAX_TRADES;
     }
 
-    function buy(coin, usd, strategy, reason) {
-      usd = Math.min(usd, s.cash);
-      if (usd < 5 || !(coin.price > 0) || s.positions[coin.addr]) return null;
-      const fee = usd * COSTS.dexFee + COSTS.networkFee;
-      const fill = coin.price * (1 + COSTS.slippage);
-      const qty = (usd - fee) / fill;
+    // Book a buy. `fill` is what the execution layer got for `usd`.
+    function buy(coin, usd, strategy, reason, fill) {
+      if (usd > s.cash + 1e-9 || usd < 5 || !(fill.qty > 0) || s.positions[coin.addr]) return null;
       s.cash -= usd;
-      s.fees += fee;
+      s.fees += fill.fee;
+      s.execCost += usd - fill.qty * coin.price;
       const pos = {
         addr: coin.addr,
         symbol: coin.symbol,
         name: coin.name,
         url: coin.url,
         strategy,
-        qty,
+        qty: fill.qty,
+        qtyRaw: fill.qtyRaw || null, // on-chain integer amount, when priced by Jupiter
         cost: usd, // remaining cost basis, including fees
         invested: usd,
-        entryPrice: fill,
+        entryPrice: fill.price,
         openedAt: Date.now(),
         peak: coin.price,
         entryLiq: coin.liq,
@@ -68,32 +80,37 @@
         last: coin.price,
       };
       s.positions[coin.addr] = pos;
-      log('BUY', pos, qty, fill, usd, reason, null);
+      log('BUY', pos, fill.qty, fill.price, usd, reason, null, fill);
       save();
       return pos;
     }
 
-    function sell(addr, fraction, price, reason) {
+    // Fraction actually worth selling: close fully if the remainder would be dust.
+    function sellFraction(addr, fraction, price) {
       const pos = s.positions[addr];
-      if (!pos || !(price > 0)) return null;
       fraction = Math.min(1, Math.max(0, fraction));
-      // Close fully if what's left would be dust.
-      if (pos.qty * (1 - fraction) * price < 2) fraction = 1;
-      const qty = pos.qty * fraction;
-      const fill = price * (1 - COSTS.slippage);
-      const gross = qty * fill;
-      const fee = gross * COSTS.dexFee + COSTS.networkFee;
-      const net = Math.max(0, gross - fee);
+      if (pos && pos.qty * (1 - fraction) * price < 2) fraction = 1;
+      return fraction;
+    }
+
+    // Book a sell of `fraction` of the position. `screen` is the market price
+    // at the time, used to measure execution cost.
+    function sell(addr, fraction, fill, reason, screen) {
+      const pos = s.positions[addr];
+      if (!pos) return null;
+      const net = fill.net;
       const costPart = pos.cost * fraction;
       const pnl = net - costPart;
       s.cash += net;
-      s.fees += fee;
+      s.fees += fill.fee;
+      s.execCost += fill.qty * screen - net;
       s.realized += pnl;
       s.stratRealized[pos.strategy] = (s.stratRealized[pos.strategy] || 0) + pnl;
-      pos.qty -= qty;
+      pos.qty -= fill.qty;
+      if (pos.qtyRaw && fill.qtyRaw) pos.qtyRaw = (BigInt(pos.qtyRaw) - BigInt(fill.qtyRaw)).toString();
       pos.cost -= costPart;
       pos.realized += pnl;
-      log('SELL', pos, qty, fill, net, reason, pnl);
+      log('SELL', pos, fill.qty, fill.price, net, reason, pnl, fill);
       if (fraction >= 1) {
         s.closed.push({ strategy: pos.strategy, pnl: pos.realized, t: Date.now() });
         s.cooldown[addr] = Date.now() + 20 * 60000;
@@ -101,6 +118,12 @@
       }
       save();
       return pnl;
+    }
+
+    // Record an order the venue refused (no route, honeypot, too illiquid).
+    function reject(coinOrPos, side, strategy, reason) {
+      log('REJECT', { symbol: coinOrPos.symbol, addr: coinOrPos.addr, strategy }, 0, NaN, 0, `${side.toLowerCase()} rejected: ${reason}`, null, null);
+      save();
     }
 
     function mark(prices) {
@@ -132,6 +155,9 @@
         pnl: equity - s.startCash,
         pnlPct: (equity / s.startCash - 1) * 100,
         fees: s.fees,
+        execCost: s.execCost,
+        quotedFills: s.trades.filter((t) => t.src === 'jupiter').length,
+        fills: s.trades.filter((t) => t.src).length,
         closedCount: s.closed.length,
         winRate: s.closed.length ? (wins / s.closed.length) * 100 : NaN,
       };
@@ -169,11 +195,16 @@
       },
       buy,
       sell,
+      sellFraction,
+      reject,
       mark,
       totals,
       recordEquity,
       strategyStats,
       inCooldown: (addr) => (s.cooldown[addr] || 0) > Date.now(),
+      setCooldown(addr, ms) {
+        s.cooldown[addr] = Date.now() + ms;
+      },
       reset() {
         s = fresh();
         save();
@@ -181,5 +212,5 @@
     };
   }
 
-  SIM.portfolio = { createPortfolio, START_CASH, COSTS };
+  SIM.portfolio = { createPortfolio, START_CASH };
 })();

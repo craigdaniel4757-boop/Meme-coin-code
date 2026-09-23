@@ -12,7 +12,7 @@
   const MAX_NEW_PER_TICK = 2;
 
   const settings = Object.assign(
-    { mode: 'live', auto: true, maxOpen: 5, manualSize: 100, enabled: {} },
+    { mode: 'live', auto: true, maxOpen: 5, manualSize: 100, enabled: {}, realQuotes: true, jupKey: '', maxRoundTrip: 15 },
     store.get('settings', {})
   );
   for (const s of S.STRATEGIES) if (!(s.id in settings.enabled)) settings.enabled[s.id] = true;
@@ -21,12 +21,14 @@
   const app = {
     settings,
     feed: null,
+    executor: null,
     portfolio: null,
     universe: new Map(), // addr -> { addr, firstSeen, misses, coin, hist, prevPrice, flashed }
     evals: new Map(),
     filter: 'ALL',
     status: { level: 'wait', text: 'Connecting…' },
     banner: '',
+    orderError: '',
     solPrice: NaN,
     lastUpdate: 0,
   };
@@ -37,6 +39,9 @@
   let lastSol = 0;
   let failures = 0;
   let everOk = false;
+  const pending = new Set(); // addrs with an order in flight
+  const sellRetryAt = new Map(); // addr -> earliest time to retry a rejected sell
+  const flagged = new Map(); // addr -> { reason, until } after a rejected buy
 
   function setMode(mode, banner, persist = true) {
     if (persist) {
@@ -44,6 +49,11 @@
       saveSettings();
     }
     app.feed = mode === 'demo' ? SIM.market.createDemoFeed() : SIM.market.createLiveFeed();
+    app.executor = SIM.execution.createExecutor({
+      useQuotes: () => mode === 'live' && settings.realQuotes,
+      getKey: () => settings.jupKey,
+      maxRoundTripPct: () => settings.maxRoundTrip,
+    });
     app.portfolio = SIM.portfolio.createPortfolio('portfolio:' + mode);
     app.universe = new Map();
     app.evals = new Map();
@@ -55,6 +65,9 @@
     lastSol = 0;
     failures = 0;
     everOk = false;
+    pending.clear();
+    sellRetryAt.clear();
+    flagged.clear();
     clearInterval(timer);
     timer = setInterval(tick, POLL_MS[mode]);
     SIM.ui.render(app);
@@ -100,18 +113,72 @@
     const held = app.portfolio.state.positions;
     app.evals = new Map();
     for (const [addr, u] of app.universe) {
-      if (u.coin) app.evals.set(addr, S.evaluate(u.coin, u.hist, held[addr], settings.enabled, now));
+      if (!u.coin) continue;
+      const ev = S.evaluate(u.coin, u.hist, held[addr], settings.enabled, now);
+      const flag = flagged.get(addr);
+      if (!held[addr] && flag && flag.until > now) {
+        ev.signal = 'AVOID';
+        ev.reason = `order rejected: ${flag.reason}`;
+      } else if (ev.signal === 'BUY' && app.portfolio.inCooldown(addr)) {
+        ev.reason = `cooling down after a recent exit · ${ev.reason}`;
+      }
+      app.evals.set(addr, ev);
     }
   }
 
-  function autoTrade(now) {
+  // Orders are async (Jupiter quotes), so each one re-checks that the world
+  // hasn't changed underneath it (mode switch, reset, position already gone).
+  async function placeBuy(coin, usd, strategy, reason) {
+    if (pending.has(coin.addr)) return false;
+    const port = app.portfolio;
+    const exec = app.executor;
+    pending.add(coin.addr);
+    try {
+      const fill = await exec.buy(coin, usd);
+      if (port !== app.portfolio) return false;
+      return !!port.buy(coin, usd, strategy, reason, fill);
+    } catch (e) {
+      if (!(e instanceof SIM.execution.OrderRejected) || port !== app.portfolio) throw e;
+      port.reject(coin, 'BUY', strategy, e.message);
+      port.setCooldown(coin.addr, 10 * 60000);
+      flagged.set(coin.addr, { reason: e.message, until: Date.now() + 10 * 60000 });
+      return false;
+    } finally {
+      pending.delete(coin.addr);
+    }
+  }
+
+  async function placeSell(addr, fraction, reason, tpIndex) {
+    const port = app.portfolio;
+    const pos = port.state.positions[addr];
+    if (!pos || pending.has(addr)) return false;
+    const u = app.universe.get(addr);
+    const screen = u && u.coin ? u.coin.price : pos.last;
+    fraction = port.sellFraction(addr, fraction, screen);
+    pending.add(addr);
+    try {
+      const fill = await app.executor.sell(pos, fraction, screen);
+      if (port !== app.portfolio || port.state.positions[addr] !== pos) return false;
+      if (tpIndex != null) pos.tpHit.push(tpIndex);
+      port.sell(addr, fraction, fill, reason, screen);
+      return true;
+    } catch (e) {
+      if (!(e instanceof SIM.execution.OrderRejected) || port !== app.portfolio) throw e;
+      port.reject(pos, 'SELL', pos.strategy, e.message);
+      sellRetryAt.set(addr, Date.now() + 30000);
+      return false;
+    } finally {
+      pending.delete(addr);
+    }
+  }
+
+  async function autoTrade(now) {
     const port = app.portfolio;
     // Exits first, so freed cash and slots are available for entries.
     for (const pos of Object.values(port.state.positions)) {
       const ev = app.evals.get(pos.addr);
-      if (!ev || ev.signal !== 'SELL' || !ev.exit) continue;
-      if (ev.exit.tpIndex != null) pos.tpHit.push(ev.exit.tpIndex);
-      port.sell(pos.addr, ev.exit.sell, app.universe.get(pos.addr).coin.price, ev.exit.reason);
+      if (!ev || ev.signal !== 'SELL' || !ev.exit || (sellRetryAt.get(pos.addr) || 0) > now) continue;
+      await placeSell(pos.addr, ev.exit.sell, ev.exit.reason, ev.exit.tpIndex);
     }
     let slots = settings.maxOpen - Object.keys(port.state.positions).length;
     const buys = [...app.evals]
@@ -122,7 +189,7 @@
       if (slots <= 0 || opened >= MAX_NEW_PER_TICK) break;
       const usd = Math.min(ev.best.strategy.size * port.totals().equity, port.state.cash);
       if (usd < 10) break;
-      if (port.buy(app.universe.get(addr).coin, usd, ev.best.strategy.id, ev.reason)) {
+      if (await placeBuy(app.universe.get(addr).coin, usd, ev.best.strategy.id, ev.reason)) {
         slots--;
         opened++;
       }
@@ -158,7 +225,13 @@
       app.portfolio.mark(prices);
       evaluateAll(now);
       if (settings.auto) {
-        autoTrade(now);
+        try {
+          await autoTrade(now);
+          app.orderError = '';
+        } catch (e) {
+          app.orderError = e.message || String(e); // an order bug must not look like a feed outage
+        }
+        if (feed !== app.feed) return;
         evaluateAll(now); // refresh signals for coins we just traded
       }
       app.portfolio.recordEquity();
@@ -185,30 +258,35 @@
     }
   }
 
-  function currentPrice(addr) {
-    const u = app.universe.get(addr);
-    return u && u.coin ? u.coin.price : app.portfolio.state.positions[addr] && app.portfolio.state.positions[addr].last;
-  }
-
   // ---- controls -------------------------------------------------------------
   function wire() {
+    const rerender = () => {
+      evaluateAll(Date.now());
+      SIM.ui.render(app);
+    };
+    const report = (err) => {
+      app.status = { level: 'err', text: `Order error: ${err.message || err}` };
+      SIM.ui.render(app);
+    };
     document.addEventListener('click', (e) => {
       const buy = e.target.closest('[data-buy]');
       const sell = e.target.closest('[data-sell]');
       const filter = e.target.closest('[data-filter]');
       if (buy) {
         const u = app.universe.get(buy.dataset.buy);
-        if (u && u.coin) app.portfolio.buy(u.coin, settings.manualSize, 'manual', 'manual buy');
+        const usd = Math.min(settings.manualSize, app.portfolio.state.cash);
+        if (!u || !u.coin || usd < 5) return;
+        buy.disabled = true;
+        buy.textContent = 'Quoting…';
+        placeBuy(u.coin, usd, 'manual', 'manual buy').catch(report).finally(rerender);
       } else if (sell) {
-        const addr = sell.dataset.sell;
-        app.portfolio.sell(addr, Number(sell.dataset.frac), currentPrice(addr), 'manual sell');
+        sell.disabled = true;
+        sell.textContent = 'Quoting…';
+        placeSell(sell.dataset.sell, Number(sell.dataset.frac), 'manual sell').catch(report).finally(rerender);
       } else if (filter) {
         app.filter = filter.dataset.filter;
-      } else {
-        return;
+        rerender();
       }
-      evaluateAll(Date.now());
-      SIM.ui.render(app);
     });
 
     document.getElementById('strategies').addEventListener('change', (e) => {
@@ -236,6 +314,31 @@
       manual.value = settings.manualSize;
       saveSettings();
       SIM.ui.render(app);
+    });
+
+    const quotes = document.getElementById('quotes-toggle');
+    quotes.checked = settings.realQuotes;
+    quotes.addEventListener('change', () => {
+      settings.realQuotes = quotes.checked;
+      saveSettings();
+      SIM.ui.render(app);
+    });
+
+    const key = document.getElementById('jup-key');
+    key.value = settings.jupKey;
+    key.addEventListener('change', () => {
+      settings.jupKey = key.value.trim();
+      saveSettings();
+      SIM.ui.render(app);
+    });
+
+    const maxRt = document.getElementById('max-rt');
+    maxRt.value = settings.maxRoundTrip;
+    maxRt.addEventListener('change', () => {
+      const v = Number(maxRt.value);
+      settings.maxRoundTrip = v >= 1 && v <= 90 ? v : 15;
+      maxRt.value = settings.maxRoundTrip;
+      saveSettings();
     });
 
     const maxOpen = document.getElementById('max-open');

@@ -47,11 +47,25 @@
           <span class="k">total P/L since start</span>
         </div>
       </div>
-      <div class="kpi"><span class="k">Realized P/L</span><span id="k-realized" class="v">+$0.00</span><small id="k-fees-sub">fees paid $0.00</small></div>
+      <div class="kpi"><span class="k">Realized P/L</span><span id="k-realized" class="v">+$0.00</span><small id="k-fees-sub">trading costs $0.00</small></div>
       <div class="kpi"><span class="k">Unrealized P/L</span><span id="k-unrealized" class="v">+$0.00</span><small>open positions, live</small></div>
       <div class="kpi"><span class="k">Cash</span><span id="k-cash" class="v">$1,000.00</span><small>available to trade</small></div>
       <div class="kpi"><span class="k">Win rate</span><span id="k-winrate" class="v">—</span><small id="k-winrate-sub">0 closed trades</small></div>
       <div class="kpi"><span class="k">Open positions</span><span id="k-open" class="v">0 / 5</span><small>max concurrent</small></div>
+    </section>
+
+    <section class="card exec">
+      <div class="exec-status">
+        <span id="exec-dot" class="dot wait"></span>
+        <b>Order fills</b>
+        <span id="exec-status">…</span>
+      </div>
+      <div class="exec-controls">
+        <label class="toggle"><input type="checkbox" id="quotes-toggle" checked><span>Price every order with a real Jupiter quote</span></label>
+        <label>Jupiter API key <input id="jup-key" type="password" placeholder="free at portal.jup.ag" autocomplete="off" spellcheck="false"></label>
+        <label>Skip buys with round-trip cost over <input id="max-rt" type="number" min="1" max="90" step="1" value="15">%</label>
+      </div>
+      <p class="muted exec-help">In live mode, each simulated buy and sell asks Jupiter, Solana's swap aggregator, for a real quote: the exact route and amount a real USDC swap would get right now, including pool fees and price impact. Before each buy it also quotes selling straight back, which catches honeypots and measures the real round-trip cost. No transaction is built or signed, and no money moves. The key is stored only in this browser and sent only to api.jup.ag.</p>
     </section>
 
     <section class="grid">
@@ -117,10 +131,10 @@
     </section>
 
     <section class="card">
-      <div class="card-head"><h2>Trade log</h2><span class="muted">simulated fills incl. 1% slippage, 0.25% DEX fee, $0.01 network fee</span></div>
+      <div class="card-head"><h2>Trade log</h2><span class="muted"><span class="src jup">JUP</span> priced by a real Jupiter quote · <span class="src est">EST</span> estimated (1% slippage + 0.25% fee) · all include a $0.01 network fee</span></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th class="num">Time</th><th>Side</th><th>Coin</th><th>Strategy</th><th class="num">Fill</th><th class="num">USD</th><th class="num">P/L</th><th>Reason</th></tr></thead>
+          <thead><tr><th class="num">Time</th><th>Side</th><th>Coin</th><th>Strategy</th><th class="num">Fill price</th><th class="num">vs screen</th><th>Source</th><th class="num">USD</th><th class="num">P/L</th><th>Reason</th></tr></thead>
           <tbody id="trades-body"></tbody>
         </table>
       </div>
@@ -128,13 +142,14 @@
     </section>
 
     <footer>
-      <p><b>Simulation only.</b> No wallet, no real money, no orders are sent anywhere. Prices come from the public DexScreener API (or a synthetic market in demo mode). The strategies are rule-based versions of popular memecoin momentum playbooks from crypto TikTok. They are not financial advice, and past simulated results don't predict real returns. Most memecoins go to zero.</p>
+      <p><b>Simulation only.</b> No wallet, no real money, and no transactions are ever sent. Market data comes from the public DexScreener API, and fills are priced with real Jupiter swap quotes (or a synthetic market in demo mode). Quotes don't capture everything a real trade faces: landing delay, MEV/sandwiching, failed transactions and priority-fee spikes. The strategies are rule-based versions of popular memecoin momentum playbooks from crypto TikTok. They are not financial advice, and past simulated results don't predict real returns. Most memecoins go to zero.</p>
     </footer>
   </main>
 
   <script src="js/util.js"></script>
   <script src="js/market.js"></script>
   <script src="js/strategies.js"></script>
+  <script src="js/execution.js"></script>
   <script src="js/portfolio.js"></script>
   <script src="js/chart.js"></script>
   <script src="js/ui.js"></script>

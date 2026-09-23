@@ -44,7 +44,7 @@
     $('k-winrate-sub').textContent = `${t.closedCount} closed trade${t.closedCount === 1 ? '' : 's'}`;
     const open = Object.keys(app.portfolio.state.positions).length;
     set('k-open', `${open} / ${app.settings.maxOpen}`);
-    $('k-fees-sub').textContent = `fees paid ${U.fmtUsd(t.fees)}`;
+    $('k-fees-sub').textContent = `trading costs ${U.fmtUsd(t.execCost)} (fees + slippage)`;
     const big = $('pnl-hero');
     big.className = 'hero ' + cls(t.pnl);
     document.title = `${U.fmtSignedUsd(t.pnl)} (${U.fmtPct(t.pnlPct, 1)}) · SOL Paper Desk`;
@@ -146,23 +146,66 @@
       .join('');
   }
 
+  function srcChip(tr) {
+    if (tr.src === 'jupiter') return `<span class="src jup" title="${U.esc(tr.route ? 'Route: ' + tr.route : 'Jupiter quote')}">JUP</span>`;
+    if (tr.src === 'model') return `<span class="src est" title="${U.esc(tr.note || 'estimated fill')}">EST</span>`;
+    return '';
+  }
+
   function renderTrades(app) {
     const trades = app.portfolio.state.trades.slice(0, 100);
     $('trades-empty').hidden = trades.length > 0;
     $('trades-body').innerHTML = trades
-      .map(
-        (t) => `<tr>
-        <td class="num">${U.fmtTime(t.t)}</td>
-        <td>${badge(t.side === 'BUY' ? 'BUY' : 'SELL', '')}</td>
-        <td><b>${U.esc(t.symbol)}</b></td>
-        <td>${U.esc(stratName(t.strategy))}</td>
-        <td class="num">${U.fmtPrice(t.price)}</td>
-        <td class="num">${U.fmtUsd(t.usd)}</td>
-        <td class="num ${t.pnl == null ? '' : cls(t.pnl)}">${t.pnl == null ? '' : U.fmtSignedUsd(t.pnl)}</td>
-        <td class="reason-cell">${U.esc(t.reason)}</td>
-      </tr>`
-      )
+      .map((tr) => {
+        const reject = tr.side === 'REJECT';
+        const side = reject ? '<span class="badge reject">REJECTED</span>' : badge(tr.side, '');
+        const extra = [
+          tr.route ? `route ${U.esc(tr.route)}` : '',
+          isFinite(tr.roundTrip) ? `round-trip cost ${tr.roundTrip.toFixed(1)}%` : '',
+          tr.note ? `estimate: ${U.esc(tr.note)}` : '',
+        ].filter(Boolean).join(' · ');
+        return `<tr class="${reject ? 'rejected' : ''}">
+        <td class="num">${U.fmtTime(tr.t)}</td>
+        <td>${side}</td>
+        <td><b>${U.esc(tr.symbol)}</b></td>
+        <td>${U.esc(stratName(tr.strategy))}</td>
+        <td class="num">${reject ? '' : U.fmtPrice(tr.price)}</td>
+        <td class="num">${isFinite(tr.vsScreen) ? U.fmtPct(tr.vsScreen, 2) : ''}</td>
+        <td>${srcChip(tr)}</td>
+        <td class="num">${reject ? '' : U.fmtUsd(tr.usd)}</td>
+        <td class="num ${tr.pnl == null ? '' : cls(tr.pnl)}">${tr.pnl == null ? '' : U.fmtSignedUsd(tr.pnl)}</td>
+        <td class="reason-cell">${U.esc(tr.reason)}${extra ? `<small>${extra}</small>` : ''}</td>
+      </tr>`;
+      })
       .join('');
+  }
+
+  function renderExec(app) {
+    const t = app.portfolio.totals();
+    const j = app.executor ? app.executor.jupiter : null;
+    const live = app.feed && app.feed.kind === 'live';
+    const counts = t.fills ? ` · ${t.quotedFills} of ${t.fills} fills priced by Jupiter` : '';
+    let level = 'wait';
+    let text;
+    if (!live) {
+      text = 'Demo market: fills are estimated (1% slippage + 0.25% fee).';
+    } else if (!app.settings.realQuotes) {
+      text = 'Real quotes are off, so fills are estimated (1% slippage + 0.25% fee).';
+    } else if (j && j.lastOk === true) {
+      level = 'ok';
+      text = `Real Jupiter quotes active (${j.ok} quotes)${counts}`;
+    } else if (j && j.lastOk === false) {
+      level = 'err';
+      text = `Jupiter quotes unavailable (${j.lastError}), so fills fall back to estimates.${app.settings.jupKey ? '' : ' Add a free API key from portal.jup.ag.'}`;
+    } else {
+      text = `Ready: the next order will be priced by Jupiter${app.settings.jupKey ? '' : ' (add a free key from portal.jup.ag if keyless quotes fail)'}${counts}`;
+    }
+    if (app.orderError) {
+      level = 'err';
+      text = `Order error: ${app.orderError} · ${text}`;
+    }
+    $('exec-dot').className = 'dot ' + level;
+    $('exec-status').textContent = text;
   }
 
   // The strategy cards are built once (so checkboxes and open <details>
@@ -223,6 +266,7 @@
   function render(app) {
     renderStatus(app);
     renderKpis(app);
+    renderExec(app);
     renderChart(app);
     renderPositions(app);
     renderScanner(app);
