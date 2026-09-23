@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>SOL Paper Desk</title>
+  <meta name="description" content="Live Solana memecoin paper-trading simulator with a fake $1,000 portfolio.">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">◎</span>
+      <div>
+        <h1>SOL Paper Desk</h1>
+        <small>Live Solana memecoin simulator · fake $1,000 · no real money</small>
+      </div>
+    </div>
+    <div class="status">
+      <span id="feed-dot" class="dot wait"></span>
+      <span id="feed-status">Connecting…</span>
+      <span class="sep">·</span>
+      <span>SOL <b id="sol-price">—</b></span>
+      <span class="sep">·</span>
+      <span id="last-update">waiting for data</span>
+    </div>
+    <div class="controls">
+      <label class="toggle"><input type="checkbox" id="auto-toggle" checked><span>Auto-trade</span></label>
+      <select id="mode-select" aria-label="Data source">
+        <option value="live">Live DexScreener</option>
+        <option value="demo">Demo market</option>
+      </select>
+      <button id="reset-btn" class="btn ghost">Reset to $1,000</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <section class="kpis">
+      <div id="pnl-hero" class="hero">
+        <span class="k">Portfolio value</span>
+        <span id="k-equity" class="v big">$1,000.00</span>
+        <div class="hero-pnl">
+          <span id="k-pnl" class="v">+$0.00</span>
+          <span id="k-pnlpct" class="v">+0.00%</span>
+          <span class="k">total P/L since start</span>
+        </div>
+      </div>
+      <div class="kpi"><span class="k">Realized P/L</span><span id="k-realized" class="v">+$0.00</span><small id="k-fees-sub">fees paid $0.00</small></div>
+      <div class="kpi"><span class="k">Unrealized P/L</span><span id="k-unrealized" class="v">+$0.00</span><small>open positions, live</small></div>
+      <div class="kpi"><span class="k">Cash</span><span id="k-cash" class="v">$1,000.00</span><small>available to trade</small></div>
+      <div class="kpi"><span class="k">Win rate</span><span id="k-winrate" class="v">—</span><small id="k-winrate-sub">0 closed trades</small></div>
+      <div class="kpi"><span class="k">Open positions</span><span id="k-open" class="v">0 / 5</span><small>max concurrent</small></div>
+    </section>
+
+    <section class="grid">
+      <div class="card chart-card">
+        <div class="card-head"><h2>Equity curve</h2><span class="muted">dashed line = $1,000 start</span></div>
+        <canvas id="equity-chart" aria-label="Portfolio equity over time"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Strategies</h2><span class="muted">toggle to enable</span></div>
+        <div id="strategies" class="strategies"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <h2>Open positions</h2>
+        <span class="muted">marked to the latest on-chain price each tick</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Coin</th><th>Strategy</th><th class="num">Entry</th><th class="num">Now</th><th class="num">Value</th>
+            <th class="num">P/L</th><th class="num">Peak</th><th class="num">Held</th><th class="num">Exit levels</th><th>Signal</th><th></th>
+          </tr></thead>
+          <tbody id="positions-body"></tbody>
+        </table>
+      </div>
+      <p id="positions-empty" class="empty">No open positions. With auto-trade on, the bot buys when a strategy's entry rules all pass.</p>
+    </section>
+
+    <section class="card">
+      <div class="card-head wrap">
+        <h2>Live scanner: buy / hold / sell</h2>
+        <div class="filters" role="tablist">
+          <button class="pill" data-filter="ALL">All <span class="n">0</span></button>
+          <button class="pill buy" data-filter="BUY">Buy <span class="n">0</span></button>
+          <button class="pill hold" data-filter="HOLD">Hold <span class="n">0</span></button>
+          <button class="pill sell" data-filter="SELL">Sell <span class="n">0</span></button>
+          <button class="pill avoid" data-filter="AVOID">Avoid <span class="n">0</span></button>
+        </div>
+        <div class="inline-settings">
+          <label>Manual buy $<input id="manual-size" type="number" min="5" step="5" value="100"></label>
+          <label>Max positions <input id="max-open" type="number" min="1" max="20" value="5"></label>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="scanner">
+          <thead><tr>
+            <th>Coin</th><th class="num">Price</th><th>Trend</th><th class="num">5m</th><th class="num">1h</th><th class="num">24h</th>
+            <th class="num">Vol 5m</th><th class="num">Buys/Sells 5m</th><th class="num">Liquidity</th><th class="num">MCap</th>
+            <th>Momentum</th><th>Signal</th><th></th>
+          </tr></thead>
+          <tbody id="scanner-body"></tbody>
+        </table>
+      </div>
+      <p id="scanner-empty" class="empty">Loading market data…</p>
+      <p class="legend">
+        <span class="badge buy">BUY</span> every entry rule of an enabled strategy passes ·
+        <span class="badge hold">HOLD</span> no trigger yet: keep holding or keep watching ·
+        <span class="badge sell">SELL</span> an exit rule fired, or sellers are in control ·
+        <span class="badge avoid">AVOID</span> fails a safety filter (thin liquidity, too new, dumping)
+      </p>
+    </section>
+
+    <section class="card">
+      <div class="card-head"><h2>Trade log</h2><span class="muted">simulated fills incl. 1% slippage, 0.25% DEX fee, $0.01 network fee</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th class="num">Time</th><th>Side</th><th>Coin</th><th>Strategy</th><th class="num">Fill</th><th class="num">USD</th><th class="num">P/L</th><th>Reason</th></tr></thead>
+          <tbody id="trades-body"></tbody>
+        </table>
+      </div>
+      <p id="trades-empty" class="empty">No trades yet.</p>
+    </section>
+
+    <footer>
+      <p><b>Simulation only.</b> No wallet, no real money, no orders are sent anywhere. Prices come from the public DexScreener API (or a synthetic market in demo mode). The strategies are rule-based versions of popular memecoin momentum playbooks from crypto TikTok. They are not financial advice, and past simulated results don't predict real returns. Most memecoins go to zero.</p>
+    </footer>
+  </main>
+
+  <script src="js/util.js"></script>
+  <script src="js/market.js"></script>
+  <script src="js/strategies.js"></script>
+  <script src="js/portfolio.js"></script>
+  <script src="js/chart.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
