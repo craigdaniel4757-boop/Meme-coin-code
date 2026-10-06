@@ -1427,7 +1427,7 @@ button {
 .benefits-intro h2 {
   margin: 1rem 0 1.25rem;
 }
-.benefits-intro p {
+.benefits-intro p:not(.eyebrow) {
   color: var(--on-dark-muted);
   font-size: 1.1rem;
 }
@@ -1760,7 +1760,7 @@ button {
   margin-top: 1rem;
   font-size: clamp(2.1rem, 2.8vw + 1rem, 3.4rem);
 }
-.cta-panel p {
+.cta-panel p:not(.eyebrow) {
   max-width: 40rem;
   margin: 1.1rem 0 0;
   color: var(--on-dark-muted);
@@ -2652,7 +2652,7 @@ button {
   margin: 1rem 0 1rem;
   font-size: clamp(2rem, 2vw + 1rem, 2.75rem);
 }
-.contact-aside > p {
+.contact-aside > p:not(.eyebrow) {
   color: var(--text-muted);
 }
 .contact-cards {
