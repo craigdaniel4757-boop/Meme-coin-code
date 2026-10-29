@@ -6,9 +6,9 @@
 
 ## TL;DR
 
-1. **There are two launch shapes.** *Anticipation spikes* peak on day 0–5 (Deltarune, Mewgenics). *Contagion curves* peak 2–9 weeks after launch, as clips spread (Lethal Company, Vampire Survivors, R.E.P.O., PEAK, Task Bar Hero). A new original game will get the contagion curve, so it has to produce clips that travel in weeks 1–6. GameDiscoverCo treats a CCU peak that comes about 9 days after launch as the signature of a viral hit ([GameDiscoverCo](https://newsletter.gamediscover.co/p/how-two-friendslop-hits-got-the-audience)).
+1. **There are two launch shapes.** *Anticipation spikes* peak on day 0–5 (Deltarune, Mewgenics). *Contagion curves* peak 2–9 weeks after launch as clips spread (Lethal Company, Vampire Survivors, R.E.P.O., PEAK, Task Bar Hero); GameDiscoverCo reads a peak ~9 days after launch as a viral signature ([GameDiscoverCo](https://newsletter.gamediscover.co/p/how-two-friendslop-hits-got-the-audience)). A new IP gets the contagion curve, so it must produce clips that travel in weeks 1–6.
 2. **Virality is built into the product, not added by marketing.** Every breakout below has a mechanic that creates a *clip*, a *comparison* or a *puzzle* without help from the studio.
-3. **A story game's main risk is "watched it instead of buying it"** ([PC Gamer Q&A](https://www.pcgamer.com/whats-a-game-you-watched-on-youtube-instead-of-finishing)). The fix is to make *your own* branch or result worth having (Undertale, Slay the Princess, DDLC), and to add secret or social layers that watching a stream can't give you.
+3. **A story game's main risk is "watched it instead of buying it"** ([PC Gamer Q&A](https://www.pcgamer.com/whats-a-game-you-watched-on-youtube-instead-of-finishing)). Fix: make *your own* branch or result worth having (Undertale, Slay the Princess, DDLC), plus secret or social layers a stream can't give you.
 4. **A free entry point works best.** Free chapters (Deltarune), a free full game (DDLC) and a 24-hour free window (Content Warning: [6.2M claims, then ~1M paid sales in two weeks](https://gamasutra.com/business/content-warning-sells-1-million-copies-following-launch-giveaway)).
 5. **Things that now cause backlash:** botted player counts and item-farming economies, generative-AI art, empty fourth-wall stunts, cute-then-horror bait, and friendslop clones.
 
@@ -18,8 +18,8 @@
 
 | Game | Trigger moment / channel | Launch → peak | Peak CCU | Shareable mechanic |
 |---|---|---|---|---|
-| **Undertale** (2015)† | Let's Plays; "Megalovania"/Sans memes (the song predates the game, from Toby Fox's EarthBound hack and Homestuck†) | Slow burn. Set a [new Steam CCU record 10 years after release](https://www.videogameschronicle.com/news/10-years-after-its-release-undertale-has-set-a-new-concurrent-players-record-on-steam) | — | The game remembers resets (Flowey, Sans)†; kill/spare routes; leitmotif music |
-| **Deltarune** | Ch1 shadow-dropped as "SURVEY_PROGRAM" on Oct 31 2018 after a one-day tease†; later chapters released as scheduled events | Peaks on launch day: [133,930 (Ch3–4, Jun 4 2025)](https://steamdb.info/app/1671210/charts); [291,816 (Ch5, Jun 24 2026)](https://www.pcgamer.com/games/rpg/deltarune-chapter-5-launches-to-nearly-300-000-concurrent-players-on-steam-chapter-6-is-coming-in-2027/) | 291,816 | Free chapters act as the funnel; Toby Fox asked Ch4 players to ["load up your save file one more time"](https://www.gamesradar.com/games/rpg/after-breaking-steam-deltarune-dev-toby-fox-appears-to-aim-to-break-the-internet-after-you-finish-chapter-4-make-sure-to-load-up-your-save-file-one-more-time-afterwards) after the credits |
+| **Undertale** (2015)† | Let's Plays; "Megalovania"/Sans memes (the song predates the game†) | Slow burn. Set a [new Steam CCU record 10 years after release](https://www.videogameschronicle.com/news/10-years-after-its-release-undertale-has-set-a-new-concurrent-players-record-on-steam) | — | The game remembers resets (Flowey, Sans)†; kill/spare routes; leitmotif music |
+| **Deltarune** | Ch1 shadow-dropped as "SURVEY_PROGRAM" on Oct 31 2018 after a one-day tease†; later chapters released as scheduled events | Peaks on launch day: [133,930 (Ch3–4, Jun 4 2025)](https://steamdb.info/app/1671210/charts); [291,816 (Ch5, Jun 24 2026)](https://www.pcgamer.com/games/rpg/deltarune-chapter-5-launches-to-nearly-300-000-concurrent-players-on-steam-chapter-6-is-coming-in-2027/) | 291,816 | Free chapters as the funnel; post-credits ["load up your save file one more time"](https://www.gamesradar.com/games/rpg/after-breaking-steam-deltarune-dev-toby-fox-appears-to-aim-to-break-the-internet-after-you-finish-chapter-4-make-sure-to-load-up-your-save-file-one-more-time-afterwards) secret |
 | **Five Nights at Freddy's** (Aug 2014) | Markiplier's facecam Let's Play ([first video ~114M views](https://www.syfy.com/syfy-wire/markiplier-link-to-five-nights-at-freddys-explained)) plus MatPat's lore theories ([credited with expanding the lore](https://thehofstrachronicle.com/?p=84627)) | Weeks; sequels roughly every 3–4 months kept the theory cycle going† | n/a | Jumpscare plus a visible reaction; fragmentary lore; brightened teaser images† |
 | **Doki Doki Literature Club** (Sep 22 2017) | Free download; Let's Plays from Sep 26 ([KYM](https://knowyourmeme.com/memes/subcultures/doki-doki-literature-club)) | Weeks | n/a | Fourth-wall horror; "Just Monika"; Monika edits the game's script and files ([Wikipedia](https://en.wikipedia.org/wiki/Monika_(Doki_Doki_Literature_Club!))) |
 | **OMORI** (2020)† | Tumblr/TikTok fandom ([memes](https://tvtropes.org/pmwiki/pmwiki.php/Memes/Omori)) | Long tail | — | Hidden route, multiple endings, emotionally heavy reveals |
@@ -33,7 +33,7 @@
 | **Inscryption** (2021)† | ARG run through the official Discord, ending in a live-action epilogue ([ARG summary](https://sites.google.com/view/kaycees-mod-general-info/arg/summary)) | Long tail | — | Encoded strings, hidden text that only shows in 4:3 letterbox, reversed audio |
 | **Cult of the Lamb** | Devolver; [1M sold in week one](https://www.gematsu.com/2022/08/cult-of-the-lamb-sales-top-one-million) | Aug 2022 → [$90M+](https://www.pcgamer.com/gaming-industry/devolvers-financials-show-cult-of-the-lamb-is-its-best-seller-earning-more-than-usd90-million-with-dlc-a-significant-factor-gamers-are-spending-more-time-on-known-ips) | — | Cute look over dark themes; Twitch integration that turns viewers into followers† |
 | **Lethal Company** | Surge in creator streams ([Shacknews](https://shacknews.com/article/137893/lethal-company-180k-concurrent-players-steam)) | Oct 23 → [240,817 on Dec 3 2023](https://steamdb.info/app/1966720/charts) (~6 weeks) | 240,817 | Proximity voice that cuts off mid-scream when a friend dies† |
-| **Content Warning** | Free for 24 hours on Apr 1 2024; ["bombarded with footage"](https://gamesradar.com/a-24-hour-free-giveaway-sent-steams-new-viral-co-op-mega-hit-to-the-moon-with-62-million-owners-after-its-first-day) | Day 1 | 204,439 | Making a horror clip *is* the game: an in-game camera and "SpookTube"† |
+| **Content Warning** | Free for 24 hours on Apr 1 2024; ["bombarded with footage"](https://gamesradar.com/a-24-hour-free-giveaway-sent-steams-new-viral-co-op-mega-hit-to-the-moon-with-62-million-owners-after-its-first-day) | Day 1 | [204,439](https://www.pcgamer.com/games/horror/steam-smash-hit-content-warning-has-sold-over-700000-copies-after-giving-away-6-million-free-copies) | Making a horror clip *is* the game: an in-game camera and "SpookTube"† |
 | **R.E.P.O.** | Clip-driven word of mouth ([80.lv](https://80.lv/articles/this-indie-co-op-horror-goes-viral-seeing-over-230k-concurrent-players)) | Feb 26 → [271,571 on Mar 23 2025](https://steamdb.info/app/3241660/charts) | 271,571 | Physics, fragile loot and voice chat: something breaks constantly |
 | **PEAK** | A jam game ([built in ~4 weeks](https://consolepcgaming.com/how-the-co-op-climbing-game-peak-was-built-in-just-four-weeks)); [2,184 at launch → 102,799 on day 6](https://www.pcguide.com/news/5-indie-game-reaches-100000-players-and-sells-one-million-copies-in-less-than-a-week/) | Jun 16 2025 → [4.5M sold by Jul 8](https://80.lv/articles/climbing-sim-peak-has-sold-4-5-million-copies-in-less-than-a-month) → [10M+](https://www.tweaktown.com/news/107179/peak-confirmed-to-have-sold-more-than-10-million-copies/index.html) | ~170k | Co-op climbing where you rely on friends; the studio's self-deprecating post became a meme ([CGM](https://www.cgmagonline.com/news/steam-peak-sells-1-million-copies/)) |
 | **Schedule I** | Streamers plus co-op | Mar 24 → [414k on Mar 30](https://kotaku.com/schedule-1-drug-dealing-sim-steam-big-hit-400k-indie-1851773695) → [455,652 in Apr 2025](https://steamcharts.com/app/3164500) | ~456k (biggest ever for a solo dev) | Shock premise; discovering product mixes and recipes |
@@ -56,22 +56,22 @@
 ## 2. Taxonomy of virality engines
 
 **E1. Reaction-moment density** (the streamer face-cam clip)
-- *How it works:* Viewers watch other people's emotions (emotional contagion). One clip of a stranger screaming or freezing is the unit that spreads.
+- *How it works:* Emotional contagion: a clip of a stranger screaming or freezing is the unit that spreads.
 - *Examples:* FNAF jumpscares, Buckshot Roulette's trigger pull, DDLC's turn, Mouthwashing.
 - *How to build it in:* Storyboard a "clip beat" every 8–12 minutes of play. Its cause has to be readable in under 2 seconds, so a cold viewer understands it. Telegraph first (silence, a slow zoom), then pay off. Put the first beat inside the first 5 minutes, because streamers decide early.
 
 **E2. Divergence and comparison** ("What did you get?")
-- *How it works:* People compare themselves socially and use results to signal identity. Results that differ create threads, polls and "my ending vs. yours" posts.
+- *How it works:* Social comparison and identity signaling: differing results create threads, polls and "my ending vs. yours" posts.
 - *Examples:* Undertale's routes, Slay the Princess forms, Balatro scores and seeds, Mewgenics cats, Schedule I mixes.
 - *How to build it in:* Every playthrough ends in a **result card**: a named ending, a portrait, rare flags, and "X% of players saw this." Add 1–3 ultra-rare outcomes for bragging rights. Make seeds shareable.
 
 **E3. The game remembers you** (meta-memory)
-- *How it works:* It feels uncanny to have agency the game noticed, and players screenshot it as proof ("it KNEW").
+- *How it works:* Uncanny noticed agency; players screenshot the proof ("it KNEW").
 - *Examples:* Undertale's Flowey and Sans remember resets†; DDLC's file manipulation; Inscryption; Deltarune's "load your save again" ([GamesRadar](https://www.gamesradar.com/games/rpg/after-breaking-steam-deltarune-dev-toby-fox-appears-to-aim-to-break-the-internet-after-you-finish-chapter-4-make-sure-to-load-up-your-save-file-one-more-time-afterwards)).
-- *How to build it in:* Keep state that persists across saves, resets and chapters, and make it **change mechanics**, not only dialogue. A memory that has no consequence is a gimmick (see section 6).
+- *How to build it in:* State that persists across saves, resets and chapters and **changes mechanics**, not only dialogue. Memory without consequence is a gimmick (section 6).
 
 **E4. Unsolved-secret communities**
-- *How it works:* Unfinished puzzles nag at people (the Zeigarnik effect). Being first to a discovery is status, and the crowd's joint solving becomes content in itself.
+- *How it works:* Unfinished puzzles nag (the Zeigarnik effect); first discovery is status; the crowd's joint solving is content in itself.
 - *Examples:* Animal Well's mural, solved in a day by pooling unique per-player pieces; the Inscryption ARG on Discord; Blue Prince; UFO 50.
 - *How to build it in:* Use three tiers of secrets: layer 1 that everyone finds, layer 2 for completionists, layer 3 that needs the community. Give each player a unique fragment, and plant clues outside the game (store page, trailer frames, website).
 
@@ -85,7 +85,7 @@
 - *How to build it in:* One character with an iconic silhouette, catchphrase and signature sound; one leitmotif arranged at least three ways (calm, battle, broken); isolatable voice blips and SFX; a permissive fan-content and covers policy at launch.
 
 **E7. Social chaos ("friendslop")**
-- *How it works:* Shared laughter and schadenfreude, with failure as the punchline. Proximity voice turned co-op horror into something people ["watched, streamed, clipped and shared"](https://knowyourmeme.com/editorials/guides/whats-the-term-for-games-like-lethal-company-and-repo-people-calling-co-op-games-friendslop-explained).
+- *How it works:* Shared laughter and schadenfreude. Proximity voice made co-op horror something people ["watched, streamed, clipped and shared"](https://knowyourmeme.com/editorials/guides/whats-the-term-for-games-like-lethal-company-and-repo-people-calling-co-op-games-friendslop-explained).
 - *Examples:* Lethal Company, Content Warning, R.E.P.O., PEAK, Webfishing, Meccha Chameleon, How to Fish.
 - *How to build it in:* 2–4 players, physics, fragile stakes, and voice that ties to the game state. Price it low enough that a whole friend group buys in.
 
@@ -140,11 +140,9 @@
 
 ## 5. Community engineering
 
-- **Discord as the place puzzles get solved.** Animal Well's mural was first finished by a Discord user ([TechRaptor](https://techraptor.net/gaming/guides/animal-well-bunny-mural-guide)). Inscryption's ARG was coordinated on the official Daniel Mullins Discord, with shared secret-finding docs ([ARG summary](https://sites.google.com/view/kaycees-mod-general-info/arg/summary)).
-  - Seed it with spoiler-gated channels, a pinned "unsolved" board, and an in-character bot that reacts to discoveries.
+- **Discord as the solving room.** Animal Well's mural was first finished by a Discord user ([TechRaptor](https://techraptor.net/gaming/guides/animal-well-bunny-mural-guide)); Inscryption's ARG ran on the official Daniel Mullins Discord with shared docs ([ARG summary](https://sites.google.com/view/kaycees-mod-general-info/arg/summary)). Seed spoiler-gated channels, a pinned "unsolved" board and an in-character bot that reacts to discoveries.
 - **ARG tools that worked.** Encoded strings, text visible only at specific resolutions, reversed audio, and live-action or real-world epilogues (Inscryption). Pre-launch puzzles that pay out keys (Blue Prince). Cryptic teasers and a surprise drop (Deltarune's SURVEY_PROGRAM†).
-- **Wikis.** Players created [animalwell.wiki.gg](https://animalwell.wiki.gg/wiki/TV) to track the secret bunnies.
-  - Design for the notebook: put info on in-world documents that players have to cross-reference, which makes a wiki necessary.
+- **Wikis.** Players built [animalwell.wiki.gg](https://animalwell.wiki.gg/wiki/TV) to track secret bunnies. Design for the notebook: in-world documents that must be cross-referenced make a wiki necessary.
 - **Theorycrafting surfaces.** Seeds (Balatro), recipe spaces (Schedule I), genetics (Mewgenics). Ship a combinatorial system with a few "broken" discoveries left in on purpose.
 - **Fan art and fan music.** Strong silhouettes and limited palettes make fan art easy. A leitmotif makes covers easy (Megalovania†; Webfishing players perform songs in-game, see ["Webfishing's Got Talent"](https://betweenmusicandgaming.substack.com/p/webfishings-got-talent)).
   - Publish a fan-content and fan-merch policy at launch.
