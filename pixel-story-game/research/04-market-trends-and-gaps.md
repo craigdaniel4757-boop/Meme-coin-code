@@ -256,4 +256,4 @@ Each gap below combines elements that show demand but have little quality supply
 11. **Launching without Simplified Chinese or Steam Deck verification [J].**
 
 ---
-*Re-verify before relying on these sections: Switch 2 install base and indie performance, Game Pass terms, Steam Machine status, and gender and age splits. All are marked [BK]. Re-running with `gamedevreports.substack.com`, `newsletter.gamediscover.co` and `howtomarketagame.com` allowed for WebFetch, plus a new search budget, would firm up sections 2 and 6.*
+*Re-verify before relying on these sections: Switch 2 install base and indie performance, Game Pass terms, Steam Machine status, and gender and age splits. All are marked [BK]. Re-running with `gamedevreports.substack.com` and `newsletter.gamediscover.co` allowed for WebFetch, plus a new search budget, would firm up sections 2 and 6.*
